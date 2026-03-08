@@ -1,0 +1,1475 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <meta name="theme-color" content="#E8EDF5"/>
+  <link rel="manifest" href="manifest.json"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+  <meta name="apple-mobile-web-app-title" content="학습 플래너"/>
+  <link rel="icon" href="icon.png"/>
+  <link rel="apple-touch-icon" href="icon.png"/>
+  <title>학습 플래너</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { height: -webkit-fill-available; }
+    body {
+      min-height: 100vh;
+      min-height: -webkit-fill-available;
+      background: #E8EDF5;
+      font-family: 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', system-ui, sans-serif;
+      overscroll-behavior: none;
+      -webkit-tap-highlight-color: transparent;
+      -webkit-text-size-adjust: 100%;
+    }
+    #root { min-height: 100vh; }
+    * { -webkit-overflow-scrolling: touch; }
+    input, select, textarea, button { font-family: inherit; }
+  </style>
+</head>
+<body>
+  <div id="root">
+    <div style="display:flex;align-items:center;justify-content:center;height:100vh;background:#E8EDF5">
+      <div style="text-align:center;color:#6B7FD4;font-family:system-ui">
+        <div style="font-size:48px;margin-bottom:16px">📚</div>
+        <div style="font-weight:700;font-size:16px">학습 플래너</div>
+        <div style="font-size:12px;color:#9BA3BE;margin-top:8px">로딩 중...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- React 18 (no JSX, no Babel needed) -->
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+
+  <script>
+ function _optionalChain(ops) { let lastAccessLHS = undefined; let value = ops[0]; let i = 1; while (i < ops.length) { const op = ops[i]; const fn = ops[i + 1]; i += 2; if ((op === 'optionalAccess' || op === 'optionalCall') && value == null) { return undefined; } if (op === 'access' || op === 'optionalAccess') { lastAccessLHS = value; value = fn(value); } else if (op === 'call' || op === 'optionalCall') { value = fn((...args) => value.call(lastAccessLHS, ...args)); lastAccessLHS = undefined; } } return value; }const { useState, useEffect, useRef } = React;
+
+/* ═══ STORAGE (localStorage) ═══════════════════════════════════ */
+const DB = {
+  get: (k) => { try { const v=localStorage.getItem('sp_'+k); return v?JSON.parse(v):null; } catch (e2) { return null; } },
+  set: (k,v) => { try { localStorage.setItem('sp_'+k, JSON.stringify(v)); } catch (e3) {} },
+  keys: () => { try { return Object.keys(localStorage).filter(k=>k.startsWith('sp_')).map(k=>k.slice(3)); } catch (e4) { return []; } }
+};
+
+/* ═══ TOKENS ════════════════════════════════════════════════════ */
+const BG='#E8EDF5',SH1='#c5cad4',SH2='#ffffff';
+const ACC='#6B7FD4',TXT='#3D4560',MUT='#9BA3BE';
+const RED='#E05C6B',GRN='#5CB88A',ORG='#E89A4B';
+const neu =(r=16,d=8)=>({background:BG,borderRadius:r,boxShadow:`${d}px ${d}px ${d*2}px ${SH1},-${d}px -${d}px ${d*2}px ${SH2}`});
+const ins =(r=16)    =>({background:BG,borderRadius:r,boxShadow:`inset 5px 5px 10px ${SH1},inset -5px -5px 10px ${SH2}`});
+const flat=(r=16)    =>({background:BG,borderRadius:r,boxShadow:`3px 3px 6px ${SH1},-3px -3px 6px ${SH2}`});
+const pill=(c=ACC)   =>({background:`linear-gradient(145deg,${c}cc,${c})`,borderRadius:50,boxShadow:`4px 4px 10px ${SH1},-2px -2px 6px ${SH2}`});
+
+/* ═══ HELPERS ═══════════════════════════════════════════════════ */
+const T=(h,m=0)=>h*60+m;
+const m2s=m=>`${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+const dStr=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const dL=ds=>{const t=new Date(ds),n=new Date();n.setHours(0,0,0,0);t.setHours(0,0,0,0);return Math.ceil((t-n)/86400000);};
+const today=()=>dStr(new Date());
+
+/* ═══ SEMESTER WEEK CALC ════════════════════════════════════════ */
+const SEM=new Date('2026-03-02'); // Week-1 Monday
+const getWk=(date=new Date())=>{
+  const d=new Date(date);d.setHours(0,0,0,0);
+  return Math.max(1,Math.min(16,Math.floor((d-SEM)/(7*864e5))+1));
+};
+const wkBounds=wk=>{
+  const s=new Date(SEM);s.setDate(s.getDate()+(wk-1)*7);
+  const e=new Date(s);e.setDate(e.getDate()+6);
+  return {s,e,ss:dStr(s),es:dStr(e),l:`${s.getMonth()+1}/${s.getDate()}~${e.getMonth()+1}/${e.getDate()}`};
+};
+
+/* ═══ TYPE META ═════════════════════════════════════════════════ */
+const TM={exam:{l:'시험',c:RED,i:'📝'},quiz:{l:'퀴즈',c:ORG,i:'❓'},assignment:{l:'과제',c:GRN,i:'📋'},study:{l:'공부',c:ACC,i:'📖'}};
+
+/* ═══ SUBJECT CLASS DAYS (0=Sun,1=Mon,2=Tue,3=Wed,4=Thu) ═══════ */
+const SD={s1:[1,3],s2:[1,3],s3:[],s4:[2,4],s5:[1,3],s6:[]};
+
+/* ═══ WEEKLY SCHEDULE (index = week-1) ═════════════════════════ */
+const WS={
+  s1:[ // 전자기학I
+    {l:'Ch1-2: 벡터 해석 개요',     t:['전자기학 소개 & 응용 분야','벡터 대수 기초','벡터 내적·외적 계산']},
+    {l:'Ch2: 좌표계 & Del',          t:['직각 좌표계 미분 요소','원통·구면 좌표계 변환','Del 연산자 이해']},
+    {l:'Ch2: 발산 & 회전',           t:['벡터 발산 (Divergence)','Divergence theorem','Curl & Stokes theorem']},
+    {l:'Ch2: Curl & Stokes',        t:['Curl 계산 연습','Stokes theorem 응용']},
+    {l:'Ch3: Coulomb & E 장',        t:['Coulomb 법칙','전기장 세기 E 계산','점·선·면 전하 E 유도']},
+    {l:'Ch3: Gauss 법칙',            t:["Gauss 법칙 (Maxwell eq)",'Gauss 법칙 응용']},
+    {l:'Ch3: 전기 쌍극자',            t:['Gauss 응용 심화','전기 쌍극자','전기력선 & 등전위면']},
+    {l:'🗓 중간고사',                 t:['중간고사 대비 총정리 (Ch1~3)'],x:true},
+    {l:'Ch4-5: 물질 내 전기장',       t:['유전체 전기장','Poisson & Laplace 방정식']},
+    {l:'Ch6: 정자기학 (1)',            t:['Biot-Savart 법칙','Ampere 회로 법칙']},
+    {l:'Ch6: 정자기학 (2)',            t:['자속 밀도','자기 쌍극자']},
+    {l:'Ch7: Faraday & EMF',         t:['Faraday 법칙','변압기·운동 EMF']},
+    {l:'Ch7: EM 파동',               t:['Maxwell 방정식 완성','시변 전위','전자파 전파']},
+    {l:'🗓 기말고사',                 t:['기말고사 대비 (Ch4~7)'],x:true},
+    {l:'시험 리뷰',                   t:['중간·기말 문제 리뷰']},
+    {l:'(예비주)',                    t:['학기 마무리']},
+  ],
+  s2:[ // 논리회로
+    {l:'Ch1: 디지털 시스템 개요',     t:['디지털 vs 아날로그','진법 변환 (2·8·16진)','보수 (1의 보수·2의 보수)']},
+    {l:'Ch1: 이진수 & 코드',          t:['이진수 산술 연산','부동소수점','BCD·ASCII·Gray 코드']},
+    {l:'Ch2: 불 대수 & 게이트',       t:['불 대수 기본 법칙','De Morgan 정리','AND·OR·NOT·NAND·NOR·XOR']},
+    {l:'Ch3: 게이트 최소화 (1)',       t:['카르노 맵 2·3변수','SOP & POS 표준형']},
+    {l:'Ch3: 게이트 최소화 (2)',       t:['4변수 카르노 맵','무관 조건 (Don\'t care)','NAND·NOR 구현']},
+    {l:'Ch4: 조합 논리 (1)',           t:['반가산기·전가산기·감산기','이진 가산기','비교기']},
+    {l:'Ch4: 조합 논리 (2)',           t:['멀티플렉서·디멀티플렉서','디코더·인코더','우선순위 인코더']},
+    {l:'🗓 중간고사',                 t:['중간고사 대비 (Ch1~4)'],x:true},
+    {l:'Ch5: 순차 논리 (1)',           t:['래치 (SR·D)','플립플롭 (JK·T·D)','특성 표·여기 표']},
+    {l:'Ch5: 순차 논리 (2)',           t:['동기 순차 회로 분석','상태 다이어그램·테이블']},
+    {l:'Ch6: 레지스터 (1)',            t:['시프트 레지스터 (직렬·병렬)','범용 레지스터']},
+    {l:'Ch6: 카운터 (2)',              t:['이진 카운터 (동기·비동기)','BCD·링 카운터']},
+    {l:'Ch7: 메모리 & PLD',           t:['ROM·RAM 구조 & 분류','PLA·PAL 구성']},
+    {l:'Ch8: RTL & Verilog',          t:['Register Transfer Level','Verilog HDL 기초 문법']},
+    {l:'보강 (일정 미정)',             t:['보강 주차 내용']},
+    {l:'🗓 기말고사',                 t:['기말고사 대비 (Ch5~8)'],x:true},
+  ],
+  s3:[ // 회로이론 (온라인)
+    {l:'Ch1: 회로 기본 개념',         t:['전류·전압·전력·에너지','수동 부호 규약','독립·종속 전원']},
+    {l:'Ch2: 저항 회로 (1)',           t:['Ohm 법칙','KVL & KCL 적용','직렬·병렬 저항']},
+    {l:'Ch2: 저항 회로 (2)',           t:['전압·전류 분배','종속 전원 포함 회로','Δ-Y 변환']},
+    {l:'Ch3: 마디 해석법',            t:['노드 전압법','초절점 (Supernode)','종속 전원 처리']},
+    {l:'Ch3: 폐로 해석법',            t:['메쉬 전류법','초메쉬 (Supermesh)','마디 vs 폐로 선택 기준']},
+    {l:'Ch5: 네트워크 정리',          t:['중첩의 원리','전원 변환']},
+    {l:'Ch5: 테브닌·노턴',            t:['테브닌 등가 회로','노턴 등가 회로','최대 전력 전달']},
+    {l:'🗓 중간고사',                 t:['중간고사 대비 (Ch1,2,3,5)'],x:true},
+    {l:'Ch6: 커패시터·인덕터',        t:['커패시터 v-i 관계 & 초기조건','인덕터 v-i 관계 & 초기조건']},
+    {l:'Ch6: 1차 회로 과도응답',       t:['RC·RL 자연·강제 응답','시정수 τ & 완전 응답']},
+    {l:'Ch7: 2차 RLC 회로',           t:['특성 방정식 & 고유주파수','과감쇠·임계·부족감쇠 판별']},
+    {l:'Ch8: 교류 & 페이저',          t:['페이저 변환','임피던스 & 어드미턴스']},
+    {l:'Ch8: 교류 회로 해석',         t:['페이저 영역 노드·메쉬','교류 테브닌 등가']},
+    {l:'Ch9: 정상 상태 전력',         t:['순시·평균·복소 전력','역률 보정']},
+    {l:'Ch10: 자기 결합 회로',        t:['상호 인덕턴스','변압기 해석']},
+    {l:'🗓 기말고사',                 t:['기말고사 대비 (Ch6~10)'],x:true},
+  ],
+  s4:[ // 신호와시스템
+    {l:'Ch1+2: 신호 개요 & 연속 신호',t:['신호·시스템 학습 목표','연속 시간 신호 종류','신호 연산 (이동·반전·스케일링)']},
+    {l:'Ch2: 연속 시간 신호 심화',    t:['단위 계단·임펄스 함수','신호 에너지 & 전력','📝 Ch2 과제 제출']},
+    {l:'Ch3: 이산 시간 신호 (1)',      t:['이산 신호 수학적 표현','이산 임펄스·계단 함수']},
+    {l:'Ch3: 이산 시간 신호 (2)',      t:['이산 신호 연산','기본 이산 신호 종류 & 성질']},
+    {l:'Ch4: 연속 시간 시스템 (1)',    t:['LTI 시스템 정의·특성','미분방정식 모델링','선형성·시불변 판별']},
+    {l:'Ch4: 연속 시스템 (2)',         t:['인과성·안정성 판별','연속 LTI 해석','📝 Ch4 과제 제출']},
+    {l:'Ch5: 이산 시스템 → 중간고사', t:['이산 LTI 시스템 특성','이산 시스템 모델링','🗓 중간고사 (Ch2~5)'],x:true},
+    {l:'Ch6: 연속 컨볼루션',          t:['컨볼루션 적분 계산','임펄스 응답 h(t)','컨볼루션 특성']},
+    {l:'Ch7: 이산 컨볼루션 & 퀴즈',   t:['이산 컨볼루션 합 계산','이산 임펄스 응답 h[n]','❓ 퀴즈 (Ch6,7)']},
+    {l:'Ch8: CTFS (연속 푸리에 급수)',t:['CTFS 정의 & 계수 계산','CTFS 수렴 조건 & 특성']},
+    {l:'Ch8: CTFS 심화',              t:['주기 신호 스펙트럼','파르세발 정리','📝 Ch8 과제 제출']},
+    {l:'Ch9: DTFS (이산 푸리에 급수)',t:['DTFS 정의 & 계산','DTFS vs CTFS 비교']},
+    {l:'Ch10: CTFT (연속 푸리에 변환)',t:['CTFT 정의 & 계산','CTFT 특성 (선형·이동·스케일)']},
+    {l:'Ch10: CTFT 심화',             t:['컨볼루션 정리','에너지 스펙트럼','📝 Ch10 과제 제출']},
+    {l:'Ch11: DTFT (이산 푸리에 변환)',t:['DTFT 정의 & 계산','DTFT vs CTFT 관계']},
+    {l:'🗓 기말고사',                 t:['기말고사 대비 (Ch8~11)'],x:true},
+  ],
+  s5:[ // OOP
+    {l:'Ch1-2: C++ 기초',             t:['C++ 프로그램 구조','변수·자료형·리터럴','cin/cout 입출력','Lab 1']},
+    {l:'Ch3-4: 데이터 & 연산',        t:['부동소수점 표현','형변환','복합 자료형 (배열·구조체)','Lab 2']},
+    {l:'Ch5: 루프 & 분기 (1)',         t:['for·while·do-while','if·else if·switch','Lab 3']},
+    {l:'Ch6: 루프 & 분기 (2)',         t:['중첩 루프','break·continue·goto','Lab 4']},
+    {l:'Ch7: 함수 (온라인)',           t:['함수 정의·호출·반환','값 전달 vs 참조 전달','포인터 매개변수','Lab 5']},
+    {l:'Ch8: 고급 함수',              t:['인라인 함수','디폴트 매개변수','함수 오버로딩','Lab 6']},
+    {l:'Ch9: 메모리 & 네임스페이스',   t:['자동·정적·동적 스토리지','new & delete','네임스페이스','Lab 7']},
+    {l:'🗓 중간고사 (4/22)',           t:['중간고사 대비 (Ch1~9)'],x:true},
+    {l:'Ch10: 객체와 클래스 (1)',      t:['클래스 선언·정의','생성자 & 소멸자','Lab 8']},
+    {l:'Ch10: 객체와 클래스 (2)',      t:['const 멤버','this 포인터','객체 배열','Lab 9']},
+    {l:'Ch11: 클래스 심화',           t:['연산자 오버로딩','프렌드 함수','변환 함수','Lab 10']},
+    {l:'Ch12: 동적 메모리 (1)',        t:['동적 할당 멤버','복사 생성자','대입 연산자','Lab 11']},
+    {l:'Ch12: 동적 메모리 (2, 온라인)',t:['이동 생성자','스마트 포인터 기초','Lab 12']},
+    {l:'Ch13: 클래스 상속 (1)',        t:['기반·파생 클래스','protected 접근','생성자 상속','Lab 13']},
+    {l:'Ch13: 상속 (2) & 기말 (6/15)',t:['가상 함수 & 다형성','추상 클래스','Lab 14','🗓 기말고사'],x:true},
+    {l:'학기 마무리',                  t:['학기 총정리']},
+  ],
+};
+
+/* ═══ INITIAL DATA ══════════════════════════════════════════════ */
+const I_SUBS=[
+  {id:'s1',name:'전자기학I',  color:'#E05C6B',professor:'박준용',lmLink:'',syllabus:'중간:40%  Ch1~3\n기말:50%  Ch4~7\n출석:10%',weekProgress:{}},
+  {id:'s2',name:'논리회로',   color:'#E89A4B',professor:'박세진',lmLink:'',syllabus:'중간:30%  Ch1~4\n기말:30%  Ch5~8\n과제:20%  (각 Ch마다)\n출석:20%',weekProgress:{}},
+  {id:'s3',name:'회로이론',   color:'#C8A84B',professor:'임영현 (온라인)',lmLink:'',syllabus:'중간:30%  Ch1,2,3,5\n기말:40%  Ch6~10\n과제:20%  (장별)\n출석:10%',weekProgress:{},isOnline:true},
+  {id:'s4',name:'신호와시스템',color:'#5CB88A',professor:'송주빈',lmLink:'',syllabus:'중간:30%  Ch2~5\n기말:30%  Ch8~11\n과제:20%  (Ch2,4,8,10 각5점)\n퀴즈:10%  Ch6~7\n출석:10%',weekProgress:{}},
+  {id:'s5',name:'OOP',        color:'#6B7FD4',professor:'정해준',lmLink:'',syllabus:'중간:35%  Ch1~9\n기말:35%  Ch1~13\n과제:20%\n출석:10%',weekProgress:{}},
+  {id:'s6',name:'승마',       color:'#8B7355',professor:'김기영',lmLink:'',syllabus:'집중수업 (금토일 2박3일)\n실습비: 340,000원\n레포트 2개\n실기 기말: 30%',weekProgress:{}},
+];
+
+const I_TT=[
+  {id:'t1', label:'전자기학I', color:'#E05C6B',sid:'s1',day:0,s:T(9,0), e:T(10,15)},
+  {id:'t2', label:'전자기학I', color:'#E05C6B',sid:'s1',day:2,s:T(9,0), e:T(10,15)},
+  {id:'t3', label:'논리회로',  color:'#E89A4B',sid:'s2',day:0,s:T(15,0),e:T(16,15)},
+  {id:'t4', label:'논리회로',  color:'#E89A4B',sid:'s2',day:2,s:T(15,0),e:T(16,15)},
+  {id:'t5', label:'OOP',       color:'#6B7FD4',sid:'s5',day:0,s:T(16,30),e:T(18,20)},
+  {id:'t6', label:'OOP',       color:'#6B7FD4',sid:'s5',day:2,s:T(16,30),e:T(18,20)},
+  {id:'t7', label:'신호와시스템',color:'#5CB88A',sid:'s4',day:1,s:T(12,0),e:T(13,15)},
+  {id:'t8', label:'신호와시스템',color:'#5CB88A',sid:'s4',day:3,s:T(12,0),e:T(13,15)},
+  {id:'t9', label:'수학학원',  color:'#9B7DD4',day:1,s:T(15,0),e:T(19,0)},
+  {id:'t10',label:'수학학원',  color:'#9B7DD4',day:3,s:T(15,0),e:T(19,0)},
+  {id:'t11',label:'도서관근로',color:'#8BA3BE',day:1,s:T(9,0), e:T(12,0)},
+  {id:'t12',label:'도서관근로',color:'#8BA3BE',day:4,s:T(11,0),e:T(14,0)},
+  {id:'t13',label:'도서관근로',color:'#8BA3BE',day:5,s:T(9,0), e:T(16,30)},
+  {id:'t14',label:'과외',      color:'#4DB8C8',day:4,s:T(19,0),e:T(22,0)},
+  {id:'t15',label:'전공탐색',  color:'#D47B8B',day:0,s:T(18,0),e:T(19,0)},
+  {id:'t16',label:'Ham학술',   color:'#C8984B',day:2,s:T(19,0),e:T(20,30)},
+];
+
+const I_EV=[
+  // 신호와시스템
+  {id:'e1', title:'신시 Ch2 과제',    date:'2026-03-15',type:'assignment',sid:'s4',done:false},
+  {id:'e2', title:'신시 Ch4 과제',    date:'2026-04-12',type:'assignment',sid:'s4',done:false},
+  {id:'e3', title:'신시 중간고사',    date:'2026-04-18',type:'exam',      sid:'s4',done:false},
+  {id:'e4', title:'신시 퀴즈 (Ch6,7)',date:'2026-05-02',type:'quiz',      sid:'s4',done:false},
+  {id:'e5', title:'신시 Ch8 과제',    date:'2026-05-17',type:'assignment',sid:'s4',done:false},
+  {id:'e6', title:'신시 Ch10 과제',   date:'2026-06-07',type:'assignment',sid:'s4',done:false},
+  {id:'e7', title:'신시 기말고사',    date:'2026-06-19',type:'exam',      sid:'s4',done:false},
+  // 논리회로
+  {id:'e8', title:'논리회로 중간고사',date:'2026-04-23',type:'exam',      sid:'s2',done:false},
+  {id:'e9', title:'논리회로 기말고사',date:'2026-06-18',type:'exam',      sid:'s2',done:false},
+  // 전자기학
+  {id:'e10',title:'전자기학 중간고사',date:'2026-04-30',type:'exam',      sid:'s1',done:false},
+  {id:'e11',title:'전자기학 기말고사',date:'2026-06-11',type:'exam',      sid:'s1',done:false},
+  // 회로이론
+  {id:'e12',title:'회로이론 중간고사',date:'2026-04-23',type:'exam',      sid:'s3',done:false},
+  {id:'e13',title:'회로이론 기말고사',date:'2026-06-18',type:'exam',      sid:'s3',done:false},
+  // OOP
+  {id:'e14',title:'OOP 중간고사',     date:'2026-04-22',type:'exam',      sid:'s5',done:false},
+  {id:'e15',title:'OOP 기말고사',     date:'2026-06-15',type:'exam',      sid:'s5',done:false},
+  // 승마
+  {id:'e16',title:'승마 실습 (반 선택)',date:'2026-03-27',type:'study',   sid:'s6',done:false,note:'3/27-29, 5/22-24, 6/5-7, 6/23-25 중 택 1'},
+  {id:'e17',title:'승마 레포트 1',    date:'2026-04-30',type:'assignment',sid:'s6',done:false},
+  {id:'e18',title:'승마 레포트 2',    date:'2026-06-10',type:'assignment',sid:'s6',done:false},
+];
+
+/* ═══ UI PRIMITIVES ════════════════════════════════════════════ */
+function Card({children,style={},onClick,inset:I=false}){
+  return React.createElement('div', { onClick: onClick, style: {...(I?ins():neu()),cursor:onClick?'pointer':'default',...style},}, children);
+}
+function Btn({children,onClick,accent=false,color=null,small=false,style={}}){
+  const b=accent?{...pill(ACC),color:'#fff',border:'none'}:color?{...pill(color),color:'#fff',border:'none'}:{...neu(50,small?3:5),color:TXT,border:'none',background:BG};
+  return React.createElement('button', { onClick: onClick, style: {...b,padding:small?'7px 14px':'12px 22px',fontSize:small?12:14,fontWeight:700,cursor:'pointer',fontFamily:'inherit',...style},}, children);
+}
+function Inp({value,onChange,placeholder,multi=false,style={}}){
+  const s={...ins(12),padding:'12px 16px',color:TXT,fontSize:14,width:'100%',outline:'none',border:'none',fontFamily:'inherit',boxSizing:'border-box',...style};
+  return multi?React.createElement('textarea', { value: value, onChange: e=>onChange(e.target.value), placeholder: placeholder, style: {...s,resize:'none',height:80},}):React.createElement('input', { value: value, onChange: e=>onChange(e.target.value), placeholder: placeholder, style: s,});
+}
+function Sel({value,onChange,children,style={}}){
+  return React.createElement('select', { value: value, onChange: e=>onChange(e.target.value), style: {...ins(10),padding:'10px 14px',color:TXT,fontSize:13,border:'none',fontFamily:'inherit',width:'100%',boxSizing:'border-box',...style},}, children);
+}
+function Modal({title,onClose,children}){
+  return(
+    React.createElement('div', { style: {position:'fixed',inset:0,background:'rgba(200,208,220,0.55)',zIndex:2000,display:'flex',alignItems:'flex-end',justifyContent:'center',backdropFilter:'blur(6px)'}, onClick: onClose,}
+      , React.createElement('div', { style: {...neu(28,12),borderRadius:'28px 28px 0 0',width:'100%',maxWidth:480,padding:'24px 20px 48px'}, onClick: e=>e.stopPropagation(),}
+        , React.createElement('div', { style: {display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20},}
+          , React.createElement('span', { style: {fontWeight:800,fontSize:17,color:TXT},}, title)
+          , React.createElement(Btn, { onClick: onClose, small: true,}, "✕")
+        )
+        , children
+      )
+    )
+  );
+}
+
+/* ═══ HOME TAB ══════════════════════════════════════════════════ */
+function HomeTab({subjects,timetable,events,todos,wsData}){
+  const now=new Date();
+  const DAY=['일','월','화','수','목','금','토'];
+  const todayDay=(now.getDay()+6)%7;
+  const td=today();
+  const wk=getWk(now);
+  const ws=wkBounds(wk);
+  const sched=timetable.filter(t=>t.day===todayDay).sort((a,b)=>a.s-b.s);
+  const upcoming=events.filter(e=>!e.done&&dL(e.date)>=0).sort((a,b)=>new Date(a.date)-new Date(b.date)).slice(0,4);
+  const left=todos.filter(t=>t.date===td&&!t.done).length+events.filter(e=>e.date===td&&!e.done).length;
+  const pri=subjects.filter(s=>wsData[s.id]).map(sub=>{
+    const nev=events.filter(e=>e.sid===sub.id&&!e.done&&dL(e.date)>=0).sort((a,b)=>new Date(a.date)-new Date(b.date))[0];
+    return{sub,nev,score:(30-Math.min(nev?dL(nev.date):999,30))+(timetable.some(t=>t.day===todayDay&&t.sid===sub.id)?5:0)};
+  }).sort((a,b)=>b.score-a.score);
+  return(
+    React.createElement('div', { style: {padding:'24px 20px 0'},}
+      , React.createElement('div', { style: {marginBottom:20},}
+        , React.createElement('div', { style: {color:MUT,fontSize:13,fontWeight:600},}, now.getFullYear(), "년 " , now.getMonth()+1, "월 " , now.getDate(), "일 " , DAY[now.getDay()], "요일")
+        , React.createElement('div', { style: {fontSize:26,fontWeight:900,color:TXT,marginTop:4},}, "안녕하세요, 동균님 👋"  )
+        , React.createElement('div', { style: {...flat(10),display:'inline-flex',alignItems:'center',gap:6,padding:'5px 12px',marginTop:8},}
+          , React.createElement('span', { style: {fontSize:11,color:ACC,fontWeight:700},}, "W", wk, "주차")
+          , React.createElement('span', { style: {fontSize:11,color:MUT},}, ws.l)
+        )
+      )
+      , React.createElement('div', { style: {display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:14,marginBottom:22},}
+        , [{l:'오늘 수업',v:sched.length+'개',c:ACC},{l:'남은 할일',v:left+'개',c:ORG},{l:'D-day',v:upcoming[0]?`D-${dL(upcoming[0].date)}`:'—',c:RED}].map((s,i)=>(
+          React.createElement(Card, { key: i, style: {padding:'16px 10px',textAlign:'center'},}
+            , React.createElement('div', { style: {fontSize:22,fontWeight:900,color:s.c},}, s.v)
+            , React.createElement('div', { style: {fontSize:10,color:MUT,marginTop:5,fontWeight:600},}, s.l)
+          )
+        ))
+      )
+      , upcoming.length>0&&(
+        React.createElement('div', { style: {marginBottom:22},}
+          , React.createElement('div', { style: {fontSize:14,color:MUT,fontWeight:700,marginBottom:12},}, "⏰ 다가오는 일정"  )
+          , React.createElement('div', { style: {display:'flex',gap:12,overflowX:'auto',paddingBottom:8},}
+            , upcoming.map(ev=>{const d=dL(ev.date);const meta=TM[ev.type];const sub=subjects.find(s=>s.id===ev.sid);return(
+              React.createElement(Card, { key: ev.id, style: {minWidth:114,padding:'14px 12px',flexShrink:0},}
+                , React.createElement('div', { style: {fontSize:20,marginBottom:6},}, meta.i)
+                , React.createElement('div', { style: {fontSize:11,fontWeight:700,color:TXT,marginBottom:4,lineHeight:1.3},}, ev.title)
+                , sub&&React.createElement('div', { style: {fontSize:9,color:sub.color,fontWeight:700,marginBottom:6},}, sub.name)
+                , React.createElement('div', { style: {fontSize:20,fontWeight:900,color:d<=3?RED:d<=7?ORG:GRN},}, d===0?'오늘!':`D-${d}`)
+              )
+            );})
+          )
+        )
+      )
+      , React.createElement('div', { style: {marginBottom:22},}
+        , React.createElement('div', { style: {fontSize:14,color:MUT,fontWeight:700,marginBottom:12},}, "📋 오늘 시간표"  )
+        , sched.length===0?React.createElement(Card, { style: {padding:'16px',textAlign:'center'},}, React.createElement('span', { style: {color:MUT},}, "오늘은 수업이 없어요 🎉"   ))
+          :sched.map(bl=>(
+          React.createElement(Card, { key: bl.id, style: {padding:'14px 16px',marginBottom:10},}
+            , React.createElement('div', { style: {display:'flex',alignItems:'center',gap:12},}
+              , React.createElement('div', { style: {width:4,height:38,borderRadius:4,background:bl.color,flexShrink:0},})
+              , React.createElement('div', null, React.createElement('div', { style: {fontWeight:700,fontSize:14,color:TXT},}, bl.label), React.createElement('div', { style: {fontSize:12,color:MUT,marginTop:2},}, m2s(bl.s), " ~ "  , m2s(bl.e)))
+            )
+          )
+        ))
+      )
+      , React.createElement('div', { style: {marginBottom:22},}
+        , React.createElement('div', { style: {fontSize:14,color:MUT,fontWeight:700,marginBottom:12},}, "🎯 오늘 공부 우선순위"   )
+        , pri.slice(0,3).map(({sub,nev},i)=>(
+          React.createElement(Card, { key: sub.id, style: {padding:'14px 16px',marginBottom:10},}
+            , React.createElement('div', { style: {display:'flex',alignItems:'center',gap:12},}
+              , React.createElement('div', { style: {...pill(sub.color),width:36,height:36,display:'flex',alignItems:'center',justifyContent:'center',fontSize:16,fontWeight:900,color:'#fff',flexShrink:0},}, i+1)
+              , React.createElement('div', { style: {flex:1},}
+                , React.createElement('div', { style: {fontWeight:700,fontSize:14,color:TXT},}, sub.name)
+                , nev&&React.createElement('div', { style: {fontSize:11,color:MUT,marginTop:2},}, nev.title, " · D-"  , dL(nev.date))
+                , wsData[sub.id]&&wsData[sub.id][wk-1]&&React.createElement('div', { style: {fontSize:10,color:sub.color,marginTop:1,fontWeight:600},}, wsData[sub.id][wk-1].l)
+              )
+            )
+          )
+        ))
+      )
+    )
+  );
+}
+
+/* ═══ STUDY TAB (예습/복습) ══════════════════════════════════════ */
+function StudyTab({subjects,studyCheck,setStudyCheck,wsData,setWsData}){
+  const [mode,setMode]=useState('review');
+  const [editModal,setEditModal]=useState(null); // {sid, wk}
+  const [editForm,setEditForm]=useState({l:'',t:[],x:false});
+  const now=new Date();
+  const curWk=getWk(now);
+  const tgtWk=mode==='review'?curWk:Math.min(curWk+1,16);
+  const bounds=wkBounds(tgtWk);
+  const toggle=key=>setStudyCheck(s=>({...s,[key]:!s[key]}));
+  const studySubs=subjects.filter(s=>wsData[s.id]&&wsData[s.id][tgtWk-1]);
+  const totalItems=studySubs.reduce((a,s)=>a+(_optionalChain([wsData, 'access', _2 => _2[s.id], 'access', _3 => _3[tgtWk-1], 'optionalAccess', _4 => _4.t, 'optionalAccess', _5 => _5.length])||0),0);
+  const doneItems=studySubs.reduce((a,s)=>{
+    const ws=wsData[s.id][tgtWk-1];
+    return a+(_optionalChain([ws, 'optionalAccess', _6 => _6.t, 'optionalAccess', _7 => _7.filter, 'call', _8 => _8((_,i)=>studyCheck[`${s.id}_${tgtWk}_${i}`]), 'optionalAccess', _9 => _9.length])||0);
+  },0);
+  const pct=totalItems>0?Math.round(doneItems/totalItems*100):0;
+
+  const openEdit=(sub,wk)=>{
+    const ws=_optionalChain([wsData, 'access', _10 => _10[sub.id], 'optionalAccess', _11 => _11[wk-1]])||{l:'',t:[],x:false};
+    setEditForm({l:ws.l||'',t:[...(ws.t||[])],x:!!ws.x});
+    setEditModal({sid:sub.id,wk,subName:sub.name,color:sub.color});
+  };
+  const saveEdit=()=>{
+    const {sid,wk}=editModal;
+    setWsData(d=>{
+      const nd={...d};
+      nd[sid]=[...nd[sid]];
+      nd[sid][wk-1]={...nd[sid][wk-1],l:editForm.l,t:editForm.t.filter(t=>t.trim()),x:editForm.x};
+      return nd;
+    });
+    // Reset check indices since topics changed
+    setStudyCheck(sc=>{
+      const nsc={...sc};
+      Object.keys(nsc).forEach(k=>{if(k.startsWith(`${sid}_${wk}_`))delete nsc[k];});
+      return nsc;
+    });
+    setEditModal(null);
+  };
+  const addTopic=()=>setEditForm(f=>({...f,t:[...f.t,'']}));
+  const updTopic=(i,v)=>setEditForm(f=>({...f,t:f.t.map((x,j)=>j===i?v:x)}));
+  const delTopic=i=>setEditForm(f=>({...f,t:f.t.filter((_,j)=>j!==i)}));
+
+  return(
+    React.createElement('div', { style: {padding:'24px 20px 0'},}
+      , React.createElement('div', { style: {marginBottom:20},}
+        , React.createElement('div', { style: {color:MUT,fontSize:13,fontWeight:600},}, "W", tgtWk, "주차 | "  , bounds.l)
+        , React.createElement('div', { style: {fontSize:26,fontWeight:900,color:TXT,marginTop:4},}, "예습 & 복습 📖"   )
+      )
+      /* Mode toggle */
+      , React.createElement('div', { style: {...ins(22),padding:4,display:'flex',gap:4,marginBottom:18},}
+        , [['review','📚 이번주 복습'],['preview','🔭 다음주 예습']].map(([k,l])=>(
+          React.createElement('div', { key: k, onClick: ()=>setMode(k), style: {flex:1,textAlign:'center',padding:'10px',borderRadius:18,cursor:'pointer',fontSize:13,fontWeight:700,
+            ...(mode===k?{...pill(ACC),color:'#fff'}:{color:MUT})},}
+            , l
+          )
+        ))
+      )
+      /* Progress bar */
+      , React.createElement(Card, { style: {padding:'18px 20px',marginBottom:20,display:'flex',alignItems:'center',gap:16},}
+        , React.createElement('div', { style: {position:'relative',flexShrink:0},}
+          , React.createElement('svg', { width: 64, height: 64,}
+            , React.createElement('circle', { cx: 32, cy: 32, r: 24, fill: "none", stroke: SH1, strokeWidth: 5,})
+            , React.createElement('circle', { cx: 32, cy: 32, r: 24, fill: "none", stroke: pct===100?GRN:ACC, strokeWidth: 5,
+              strokeDasharray: `${2*Math.PI*24}`, strokeDashoffset: `${2*Math.PI*24*(1-pct/100)}`,
+              strokeLinecap: "round", transform: "rotate(-90 32 32)"  , style: {transition:'stroke-dashoffset 0.4s'},})
+            , React.createElement('text', { x: 32, y: 36, textAnchor: "middle", style: {fontSize:13,fontWeight:900,fill:TXT,fontFamily:'inherit'},}, pct, "%")
+          )
+        )
+        , React.createElement('div', null
+          , React.createElement('div', { style: {fontWeight:700,color:TXT,fontSize:16},}, mode==='review'?'복습 진행률':'예습 진행률')
+          , React.createElement('div', { style: {fontSize:12,color:MUT,marginTop:2},}, doneItems, " / "  , totalItems, " 항목 완료"  )
+          , React.createElement('div', { style: {fontSize:11,color:pct===100?GRN:ACC,marginTop:4,fontWeight:600},}, pct===100?'✅ 완료!':mode==='review'?'오늘 배운 내용을 점검해요':'다음 수업을 미리 확인해요')
+        )
+      )
+      /* Subject checklist cards */
+      , studySubs.map(sub=>{
+        const ws=wsData[sub.id][tgtWk-1];
+        if(!ws)return null;
+        const topics=ws.t||[];
+        const done=topics.filter((_,i)=>studyCheck[`${sub.id}_${tgtWk}_${i}`]).length;
+        const allDone=done===topics.length&&topics.length>0;
+        return(
+          React.createElement(Card, { key: sub.id, style: {marginBottom:14,overflow:'hidden'},}
+            , React.createElement('div', { style: {padding:'14px 16px',display:'flex',alignItems:'center',gap:12,borderBottom:`1px solid ${SH1}30`,
+              background:allDone?`${GRN}10`:'transparent'},}
+              , React.createElement('div', { style: {width:10,height:10,borderRadius:'50%',background:sub.color,flexShrink:0,boxShadow:`1px 1px 4px ${sub.color}88`},})
+              , React.createElement('div', { style: {flex:1},}
+                , React.createElement('div', { style: {display:'flex',alignItems:'center',gap:6},}
+                  , React.createElement('span', { style: {fontWeight:700,fontSize:14,color:TXT},}, sub.name)
+                  , ws.x&&React.createElement('span', { style: {fontSize:9,color:RED,fontWeight:700,background:RED+'22',padding:'1px 6px',borderRadius:4},}, "시험주")
+                  , sub.isOnline&&React.createElement('span', { style: {fontSize:9,color:MUT,fontWeight:700,background:MUT+'22',padding:'1px 6px',borderRadius:4},}, "온라인")
+                )
+                , React.createElement('div', { style: {fontSize:11,color:sub.color,marginTop:1,fontWeight:600},}, ws.l)
+              )
+              , React.createElement('div', { style: {display:'flex',gap:6,alignItems:'center'},}
+                , React.createElement(Btn, { onClick: ()=>openEdit(sub,tgtWk), small: true, style: {padding:'5px 8px',fontSize:11},}, "✏️")
+                , React.createElement('div', { style: {...neu(16,3),padding:'3px 10px',fontSize:11,fontWeight:700,color:allDone?GRN:MUT},}, done, "/", topics.length)
+              )
+            )
+            , React.createElement('div', { style: {padding:'8px 16px'},}
+              , topics.length===0&&React.createElement('div', { style: {padding:'12px 0',color:MUT,fontSize:12,textAlign:'center'},}, "항목 없음 — ✏️ 버튼으로 추가하세요"     )
+              , topics.map((topic,i)=>{
+                const key=`${sub.id}_${tgtWk}_${i}`;
+                const checked=!!studyCheck[key];
+                return(
+                  React.createElement('div', { key: i, onClick: ()=>toggle(key), style: {display:'flex',alignItems:'center',gap:12,padding:'9px 0',cursor:'pointer',
+                    borderBottom:i<topics.length-1?`1px solid ${SH1}18`:'none'},}
+                    , React.createElement('div', { style: {width:22,height:22,borderRadius:6,flexShrink:0,transition:'all 0.15s',
+                      ...(checked?{...pill(sub.color),display:'flex',alignItems:'center',justifyContent:'center'}:{...neu(6,3)})},}
+                      , checked&&React.createElement('span', { style: {color:'#fff',fontSize:12,fontWeight:700},}, "✓")
+                    )
+                    , React.createElement('span', { style: {fontSize:13,color:checked?MUT:TXT,textDecoration:checked?'line-through':'none',lineHeight:1.4},}, topic)
+                  )
+                );
+              })
+            )
+          )
+        );
+      })
+      , tgtWk>16&&React.createElement(Card, { style: {padding:'20px',textAlign:'center'},}, React.createElement('span', { style: {color:MUT},}, "학기가 끝났어요 🎉"  ))
+
+      /* Edit Modal */
+      , editModal!==null&&(
+        React.createElement(Modal, { title: `${editModal.subName} ${editModal.wk}주차 수정`, onClose: ()=>setEditModal(null),}
+          , React.createElement('div', { style: {display:'flex',flexDirection:'column',gap:12,maxHeight:'60vh',overflowY:'auto'},}
+            , React.createElement('div', null
+              , React.createElement('div', { style: {fontSize:12,color:MUT,fontWeight:600,marginBottom:6},}, "주차 제목" )
+              , React.createElement(Inp, { value: editForm.l, onChange: v=>setEditForm(f=>({...f,l:v})), placeholder: "예: Ch2: 좌표계 & Del"    ,})
+            )
+            , React.createElement('div', { style: {display:'flex',alignItems:'center',gap:10,padding:'10px 14px',...ins(10),borderRadius:10},}
+              , React.createElement('span', { style: {fontSize:13,color:TXT,flex:1},}, "🗓 시험 주차로 표시"   )
+              , React.createElement('div', { onClick: ()=>setEditForm(f=>({...f,x:!f.x})),
+                style: {width:44,height:24,borderRadius:12,cursor:'pointer',transition:'all 0.2s',
+                  background:editForm.x?ACC:SH1,position:'relative'},}
+                , React.createElement('div', { style: {position:'absolute',top:2,left:editForm.x?22:2,width:20,height:20,
+                  borderRadius:'50%',background:'#fff',transition:'left 0.2s',
+                  boxShadow:'2px 2px 4px rgba(0,0,0,0.2)'},})
+              )
+            )
+            , React.createElement('div', null
+              , React.createElement('div', { style: {fontSize:12,color:MUT,fontWeight:600,marginBottom:8},}, "학습 항목" )
+              , editForm.t.map((topic,i)=>(
+                React.createElement('div', { key: i, style: {display:'flex',gap:8,marginBottom:8,alignItems:'center'},}
+                  , React.createElement('div', { style: {...ins(10),flex:1,display:'flex',alignItems:'center',padding:'0 12px',borderRadius:10},}
+                    , React.createElement('input', { value: topic, onChange: e=>updTopic(i,e.target.value),
+                      placeholder: `항목 ${i+1}`,
+                      style: {flex:1,background:'transparent',border:'none',outline:'none',
+                        color:TXT,fontSize:13,fontFamily:'inherit',padding:'10px 0'},})
+                  )
+                  , React.createElement(Btn, { onClick: ()=>delTopic(i), color: RED, small: true, style: {padding:'7px 10px',flexShrink:0},}, "✕")
+                )
+              ))
+              , React.createElement(Btn, { onClick: addTopic, style: {width:'100%',marginTop:4},}, "＋ 항목 추가"  )
+            )
+            , React.createElement(Btn, { onClick: saveEdit, accent: true, style: {width:'100%'},}, "저장")
+          )
+        )
+      )
+    )
+  );
+}
+
+/* ═══ TODO TAB ══════════════════════════════════════════════════ */
+function TodoTab({subjects,events,setEvents,todos,setTodos}){
+  const [input,setInput]=useState('');const [sid,setSid]=useState('');const [trash,setTrash]=useState([]);
+  const now=new Date();const DAY=['일','월','화','수','목','금','토'];const td=today();
+  const todayEvs=events.filter(e=>e.date===td);const todayTds=todos.filter(t=>t.date===td);
+  const activeEvs=todayEvs.filter(e=>!e.done);const activeTds=todayTds.filter(t=>!t.done);
+  const doneAll=[...todayEvs.filter(e=>e.done),...todayTds.filter(t=>t.done)];
+  const total=todayEvs.length+todayTds.length;const doneN=doneAll.length;const pct=total>0?Math.round(doneN/total*100):0;
+  const addTodo=()=>{if(!input.trim())return;setTodos(t=>[...t,{id:uid(),title:input,sid,date:td,done:false}]);setInput('');setSid('');};
+  const completeTd=item=>{setTodos(t=>t.map(x=>x.id===item.id?{...x,done:true}:x));setTrash(t=>[{id:uid(),kind:'todo',item},...t].slice(0,8));};
+  const completeEv=item=>{setEvents(e=>e.map(x=>x.id===item.id?{...x,done:true}:x));setTrash(t=>[{id:uid(),kind:'event',item},...t].slice(0,8));};
+  const restore=tr=>{if(tr.kind==='todo')setTodos(t=>t.map(x=>x.id===tr.item.id?{...x,done:false}:x));else setEvents(e=>e.map(x=>x.id===tr.item.id?{...x,done:false}:x));setTrash(t=>t.filter(x=>x.id!==tr.id));};
+  const undone=(item,kind)=>{if(kind==='todo')setTodos(t=>t.map(x=>x.id===item.id?{...x,done:false}:x));else setEvents(e=>e.map(x=>x.id===item.id?{...x,done:false}:x));};
+  return(
+    React.createElement('div', { style: {padding:'24px 20px 0'},}
+      , React.createElement('div', { style: {marginBottom:20},}
+        , React.createElement('div', { style: {color:MUT,fontSize:13,fontWeight:600},}, now.getFullYear(), "년 " , now.getMonth()+1, "월 " , now.getDate(), "일 " , DAY[now.getDay()], "요일")
+        , React.createElement('div', { style: {fontSize:26,fontWeight:900,color:TXT,marginTop:4},}, "오늘의 할 일 ✅"   )
+      )
+      /* Progress */
+      , React.createElement(Card, { style: {padding:'18px 20px',marginBottom:20,display:'flex',alignItems:'center',gap:16},}
+        , React.createElement('div', { style: {position:'relative',flexShrink:0},}
+          , React.createElement('svg', { width: 64, height: 64,}
+            , React.createElement('circle', { cx: 32, cy: 32, r: 24, fill: "none", stroke: SH1, strokeWidth: 5,})
+            , React.createElement('circle', { cx: 32, cy: 32, r: 24, fill: "none", stroke: pct===100?GRN:ACC, strokeWidth: 5,
+              strokeDasharray: `${2*Math.PI*24}`, strokeDashoffset: `${2*Math.PI*24*(1-pct/100)}`,
+              strokeLinecap: "round", transform: "rotate(-90 32 32)"  , style: {transition:'stroke-dashoffset 0.4s'},})
+            , React.createElement('text', { x: 32, y: 36, textAnchor: "middle", style: {fontSize:13,fontWeight:900,fill:TXT,fontFamily:'inherit'},}, pct, "%")
+          )
+        )
+        , React.createElement('div', null, React.createElement('div', { style: {fontWeight:700,color:TXT,fontSize:16},}, doneN, " / "  , total, " 완료" )
+          , React.createElement('div', { style: {fontSize:12,color:MUT,marginTop:2},}, total===0?'+ 아래에서 할 일을 추가해요':pct===100?'✅ 오늘 다 했어요!':'화이팅!')
+        )
+      )
+      /* Undo zone */
+      , trash.length>0&&(
+        React.createElement('div', { style: {marginBottom:18},}
+          , React.createElement('div', { style: {fontSize:12,color:MUT,fontWeight:700,marginBottom:10},}, "↩️ 최근 완료 — 실수했다면 되돌리기"     )
+          , trash.map(tr=>{const sub=subjects.find(s=>s.id===tr.item.sid);return(
+            React.createElement(Card, { key: tr.id, style: {padding:'10px 14px',marginBottom:8,display:'flex',alignItems:'center',gap:10},}
+              , React.createElement('span', { style: {fontSize:14,color:GRN},}, "✓")
+              , React.createElement('div', { style: {flex:1},}
+                , React.createElement('div', { style: {fontSize:13,color:MUT,textDecoration:'line-through'},}, tr.item.title)
+                , sub&&React.createElement('div', { style: {fontSize:9,color:sub.color,fontWeight:700},}, sub.name)
+              )
+              , React.createElement(Btn, { onClick: ()=>restore(tr), color: ORG, small: true,}, "↩️ 되돌리기" )
+            )
+          );})
+        )
+      )
+      /* Active items */
+      , (activeEvs.length>0||activeTds.length>0)&&(
+        React.createElement('div', { style: {marginBottom:18},}
+          , React.createElement('div', { style: {fontSize:13,color:MUT,fontWeight:700,marginBottom:12},}, "📌 남은 할 일"   )
+          , activeEvs.map(ev=>{const meta=TM[ev.type];const sub=subjects.find(s=>s.id===ev.sid);const d=dL(ev.date);return(
+            React.createElement(Card, { key: ev.id, style: {padding:'14px 16px',marginBottom:12},}
+              , React.createElement('div', { style: {display:'flex',alignItems:'center',gap:12},}
+                , React.createElement('div', { style: {...pill(meta.c),width:40,height:40,display:'flex',alignItems:'center',justifyContent:'center',fontSize:18,flexShrink:0},}, meta.i)
+                , React.createElement('div', { style: {flex:1},}
+                  , React.createElement('div', { style: {fontWeight:700,fontSize:14,color:TXT},}, ev.title)
+                  , React.createElement('div', { style: {display:'flex',gap:6,marginTop:3,alignItems:'center'},}
+                    , sub&&React.createElement('span', { style: {fontSize:10,color:sub.color,fontWeight:700},}, sub.name)
+                    , React.createElement('span', { style: {fontSize:10,color:d===0?RED:MUT,fontWeight:600},}, d===0?'오늘!':d<0?'지남':`D-${d}`)
+                  )
+                )
+                , React.createElement(Btn, { onClick: ()=>completeEv(ev), accent: true, small: true,}, "완료")
+              )
+            )
+          );})
+          , activeTds.map(td2=>{const sub=subjects.find(s=>s.id===td2.sid);return(
+            React.createElement(Card, { key: td2.id, style: {padding:'14px 16px',marginBottom:12},}
+              , React.createElement('div', { style: {display:'flex',alignItems:'center',gap:12},}
+                , React.createElement('div', { onClick: ()=>completeTd(td2), style: {...neu(20,4),width:30,height:30,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',flexShrink:0},}
+                  , React.createElement('div', { style: {width:12,height:12,borderRadius:'50%',...ins(6)},})
+                )
+                , React.createElement('div', { style: {flex:1},}
+                  , React.createElement('div', { style: {fontWeight:600,fontSize:14,color:TXT},}, td2.title)
+                  , sub&&React.createElement('div', { style: {fontSize:10,color:sub.color,fontWeight:700,marginTop:2},}, sub.name)
+                )
+                , React.createElement(Btn, { onClick: ()=>completeTd(td2), accent: true, small: true,}, "완료")
+              )
+            )
+          );})
+        )
+      )
+      /* Add */
+      , React.createElement(Card, { style: {padding:'16px',marginBottom:18},}
+        , React.createElement('div', { style: {fontSize:13,color:MUT,fontWeight:700,marginBottom:12},}, "＋ 할 일 추가"   )
+        , React.createElement(Inp, { value: input, onChange: setInput, placeholder: "오늘 할 일..."  , style: {marginBottom:10},})
+        , React.createElement(Sel, { value: sid, onChange: setSid, style: {marginBottom:12},}
+          , React.createElement('option', { value: "",}, "과목 연결 (선택사항)"  )
+          , I_SUBS.map(s=>React.createElement('option', { key: s.id, value: s.id,}, s.name))
+        )
+        , React.createElement(Btn, { onClick: addTodo, accent: true, style: {width:'100%'},}, "추가하기")
+      )
+      /* Done */
+      , doneAll.length>0&&(
+        React.createElement('div', { style: {marginBottom:18},}
+          , React.createElement('div', { style: {fontSize:13,color:MUT,fontWeight:700,marginBottom:10},}, "✅ 완료 ("  , doneAll.length, ")")
+          , doneAll.map(item=>{const isEv=!!item.type;const sub=subjects.find(s=>s.id===item.sid);return(
+            React.createElement(Card, { key: item.id, style: {padding:'11px 14px',marginBottom:8,opacity:0.6},}
+              , React.createElement('div', { style: {display:'flex',alignItems:'center',gap:10},}
+                , React.createElement('span', { style: {fontSize:14},}, isEv?(_optionalChain([TM, 'access', _12 => _12[item.type], 'optionalAccess', _13 => _13.i])||'✅'):'✅')
+                , React.createElement('div', { style: {flex:1},}
+                  , React.createElement('div', { style: {fontSize:13,color:MUT,textDecoration:'line-through'},}, item.title)
+                  , sub&&React.createElement('span', { style: {fontSize:9,color:sub.color,fontWeight:700},}, sub.name)
+                )
+                , React.createElement(Btn, { onClick: ()=>undone(item,isEv?'event':'todo'), color: ORG, small: true,}, "↩")
+              )
+            )
+          );})
+        )
+      )
+    )
+  );
+}
+
+/* ═══ TIMETABLE TAB ═════════════════════════════════════════════ */
+function TimetableTab({subjects,timetable,setTimetable}){
+  const [modal,setModal]=useState(null);const [form,setForm]=useState({});
+  const PX=1.5,GS2=8*60,GE2=23*60,GH2=(GE2-GS2)*PX;const DAYS2=['월','화','수','목','금','토'];const TW=34;
+  const open=day=>{setForm({label:'',color:ACC,sid:'',day,sh:9,sm:0,eh:10,em:0});setModal({mode:'add'});};
+  const edit=item=>{setForm({...item,sh:Math.floor(item.s/60),sm:item.s%60,eh:Math.floor(item.e/60),em:item.e%60});setModal({mode:'edit',id:item.id});};
+  const save=()=>{const it={...form,s:T(form.sh,form.sm),e:T(form.eh,form.em)};modal.mode==='add'?setTimetable(tt=>[...tt,{...it,id:uid()}]):setTimetable(tt=>tt.map(t=>t.id===modal.id?{...it,id:modal.id}:t));setModal(null);};
+  const del=()=>{setTimetable(tt=>tt.filter(t=>t.id!==modal.id));setModal(null);};
+  const hours=Array.from({length:(GE2-GS2)/60+1},(_,i)=>i+GS2/60);
+  return(
+    React.createElement('div', { style: {height:'100vh',display:'flex',flexDirection:'column',background:BG},}
+      , React.createElement('div', { style: {padding:'20px 20px 12px',display:'flex',justifyContent:'space-between',alignItems:'center'},}
+        , React.createElement('div', { style: {fontWeight:800,fontSize:20,color:TXT},}, "📋 시간표" )
+        , React.createElement(Btn, { onClick: ()=>open(0), small: true, accent: true,}, "+ 추가" )
+      )
+      , React.createElement('div', { style: {display:'flex',paddingLeft:TW,paddingRight:8,paddingBottom:8},}
+        , DAYS2.map((d,i)=>React.createElement('div', { key: i, style: {flex:1,textAlign:'center',fontSize:11,fontWeight:700,color:MUT},}, d))
+      )
+      , React.createElement('div', { style: {flex:1,overflowY:'auto',position:'relative'},}
+        , React.createElement('div', { style: {display:'flex',position:'relative',height:GH2},}
+          , React.createElement('div', { style: {width:TW,flexShrink:0,position:'sticky',left:0,background:BG,zIndex:10},}
+            , hours.map(h=>React.createElement('div', { key: h, style: {position:'absolute',top:(h*60-GS2)*PX-8,left:0,width:TW,textAlign:'right',paddingRight:6,fontSize:9,color:MUT},}, h, "시"))
+          )
+          , React.createElement('div', { style: {position:'absolute',left:TW,right:0,top:0,height:GH2,pointerEvents:'none'},}
+            , hours.map(h=>React.createElement('div', { key: h, style: {position:'absolute',top:(h*60-GS2)*PX,left:0,right:0,borderTop:`1px solid ${SH1}50`},}))
+          )
+          , DAYS2.map((d,di)=>(
+            React.createElement('div', { key: di, style: {flex:1,position:'relative',borderLeft:`1px solid ${SH1}40`,cursor:'pointer'}, onClick: ()=>open(di),}
+              , timetable.filter(t=>t.day===di).map(bl=>{
+                const top=(bl.s-GS2)*PX,h=(bl.e-bl.s)*PX;
+                return(React.createElement('div', { key: bl.id, onClick: e=>{e.stopPropagation();edit(bl);},
+                  style: {position:'absolute',top,left:2,right:2,height:Math.max(h,18),background:bl.color,borderRadius:8,padding:'3px 4px',cursor:'pointer',boxShadow:`2px 2px 6px ${bl.color}66`},}
+                  , React.createElement('div', { style: {fontSize:9,fontWeight:700,color:'#fff',lineHeight:1.2},}, bl.label)
+                  , React.createElement('div', { style: {fontSize:8,color:'rgba(255,255,255,0.8)'},}, m2s(bl.s))
+                ));
+              })
+            )
+          ))
+        )
+      )
+      , modal&&(
+        React.createElement(Modal, { title: modal.mode==='add'?'블록 추가':'블록 수정', onClose: ()=>setModal(null),}
+          , React.createElement('div', { style: {display:'flex',flexDirection:'column',gap:12},}
+            , React.createElement(Inp, { value: form.label||'', onChange: v=>setForm(f=>({...f,label:v})), placeholder: "이름",})
+            , React.createElement(Sel, { value: form.sid||'', onChange: v=>{const s=subjects.find(x=>x.id===v);setForm(f=>({...f,sid:v,label:_optionalChain([s, 'optionalAccess', _14 => _14.name])||f.label,color:_optionalChain([s, 'optionalAccess', _15 => _15.color])||f.color}));},}
+              , React.createElement('option', { value: "",}, "과목 연결 (선택)"  ), subjects.map(s=>React.createElement('option', { key: s.id, value: s.id,}, s.name))
+            )
+            , React.createElement('div', { style: {display:'flex',gap:8,flexWrap:'wrap'},}
+              , ['#E05C6B','#E89A4B','#C8A84B','#5CB88A','#6B7FD4','#9B7DD4','#4DB8C8','#8BA3BE','#D47B8B','#C8984B','#8B7355'].map(c=>(
+                React.createElement('div', { key: c, onClick: ()=>setForm(f=>({...f,color:c})), style: {width:26,height:26,borderRadius:'50%',background:c,cursor:'pointer',boxShadow:form.color===c?`0 0 0 3px ${BG},0 0 0 5px ${c}`:`3px 3px 6px ${SH1}`},})
+              ))
+            )
+            , React.createElement('div', { style: {display:'grid',gridTemplateColumns:'repeat(6,1fr)',gap:6},}
+              , DAYS2.map((d,i)=>(
+                React.createElement('div', { key: i, onClick: ()=>setForm(f=>({...f,day:i})), style: {textAlign:'center',padding:'8px 2px',borderRadius:10,cursor:'pointer',fontSize:13,fontWeight:700,
+                  ...(form.day===i?{...pill(ACC),color:'#fff'}:{...flat(10),color:MUT})},}, d)
+              ))
+            )
+            , React.createElement('div', { style: {display:'grid',gridTemplateColumns:'1fr 14px 1fr',gap:8,alignItems:'center'},}
+              , React.createElement('div', { style: {display:'flex',gap:4},}
+                , React.createElement('select', { value: form.sh||0, onChange: e=>setForm(f=>({...f,sh:+e.target.value})), style: {...ins(8),flex:1,padding:'8px 4px',color:TXT,fontSize:12,border:'none',fontFamily:'inherit'},}
+                  , Array.from({length:16},(_,i)=>i+8).map(h=>React.createElement('option', { key: h, value: h,}, h, "시"))
+                )
+                , React.createElement('select', { value: form.sm||0, onChange: e=>setForm(f=>({...f,sm:+e.target.value})), style: {...ins(8),flex:1,padding:'8px 4px',color:TXT,fontSize:12,border:'none',fontFamily:'inherit'},}
+                  , [0,5,10,15,20,25,30,35,40,45,50,55].map(m=>React.createElement('option', { key: m, value: m,}, String(m).padStart(2,'0')))
+                )
+              )
+              , React.createElement('span', { style: {textAlign:'center',color:MUT,fontWeight:700},}, "~")
+              , React.createElement('div', { style: {display:'flex',gap:4},}
+                , React.createElement('select', { value: form.eh||0, onChange: e=>setForm(f=>({...f,eh:+e.target.value})), style: {...ins(8),flex:1,padding:'8px 4px',color:TXT,fontSize:12,border:'none',fontFamily:'inherit'},}
+                  , Array.from({length:16},(_,i)=>i+8).map(h=>React.createElement('option', { key: h, value: h,}, h, "시"))
+                )
+                , React.createElement('select', { value: form.em||0, onChange: e=>setForm(f=>({...f,em:+e.target.value})), style: {...ins(8),flex:1,padding:'8px 4px',color:TXT,fontSize:12,border:'none',fontFamily:'inherit'},}
+                  , [0,5,10,15,20,25,30,35,40,45,50,55].map(m=>React.createElement('option', { key: m, value: m,}, String(m).padStart(2,'0')))
+                )
+              )
+            )
+            , React.createElement('div', { style: {display:'flex',gap:10,marginTop:4},}
+              , modal.mode==='edit'&&React.createElement(Btn, { onClick: del, color: RED, style: {flex:1},}, "삭제")
+              , React.createElement(Btn, { onClick: save, accent: true, style: {flex:2},}, "저장")
+            )
+          )
+        )
+      )
+    )
+  );
+}
+
+/* ═══ CALENDAR TAB ════════════════════════════════════════════ */
+function EvModal({ev, subjects, onClose, onDone, onDel}) {
+  const meta = TM[ev.type] || TM.study;
+  const sub  = subjects.find(s => s.id === ev.sid);
+  const col  = sub ? sub.color : (meta.c || ACC);
+  const d    = dL(ev.date);
+  return (
+    React.createElement(Modal, { title: "일정 상세" , onClose: onClose,}
+      , React.createElement('div', { style: {display:'flex', flexDirection:'column', gap:14},}
+        , React.createElement('div', { style: {display:'flex', alignItems:'center', gap:14},}
+          , React.createElement('div', { style: {width:52, height:52, borderRadius:'50%', flexShrink:0,
+            background:'linear-gradient(145deg,'+col+'cc,'+col+')',
+            boxShadow:'4px 4px 10px #c5cad4,-2px -2px 6px #ffffff',
+            display:'flex', alignItems:'center', justifyContent:'center', fontSize:24},}
+            , meta.i
+          )
+          , React.createElement('div', null
+            , React.createElement('div', { style: {fontWeight:800, fontSize:18, color:'#3D4560',
+              textDecoration: ev.done ? 'line-through' : 'none'},}, ev.title)
+            , React.createElement('div', { style: {fontSize:12, color:'#9BA3BE', marginTop:2},}
+              , ev.date, " · "  , d === 0 ? '오늘' : d < 0 ? Math.abs(d)+'일 지남' : 'D-'+d
+            )
+          )
+        )
+        , sub && (
+          React.createElement('div', { style: {background:'#E8EDF5', borderRadius:10, padding:'10px 14px',
+            boxShadow:'inset 5px 5px 10px #c5cad4,inset -5px -5px 10px #ffffff',
+            fontSize:13, color:sub.color, fontWeight:700},}
+            , sub.name
+          )
+        )
+        , ev.note ? (
+          React.createElement('div', { style: {background:'#E8EDF5', borderRadius:10, padding:'10px 14px',
+            boxShadow:'inset 5px 5px 10px #c5cad4,inset -5px -5px 10px #ffffff',
+            fontSize:13, color:'#3D4560'},}
+            , ev.note
+          )
+        ) : null
+        , React.createElement('div', { style: {display:'flex', gap:10},}
+          , React.createElement(Btn, { onClick: onDone, color: ev.done ? '#E89A4B' : '#5CB88A', style: {flex:1},}
+            , ev.done ? '↩ 되돌리기' : '✓ 완료'
+          )
+          , React.createElement(Btn, { onClick: onDel, color: "#E05C6B", style: {flex:1},}, "🗑 삭제" )
+        )
+      )
+    )
+  );
+}
+
+function CalendarTab({subjects, events, setEvents, wsData}) {
+  const now    = new Date();
+  const todStr = dStr(now);
+  const [yr,  setYr]  = useState(now.getFullYear());
+  const [mo,  setMo]  = useState(now.getMonth());
+  const [mode,setMode]= useState('schedule');
+  const [selEv,setSelEv]  = useState(null);
+  const [adding,setAdding]= useState(false);
+  const [addDate,setAddDate]= useState(todStr);
+  const [form, setForm]   = useState({title:'',date:todStr,type:'exam',sid:'',note:''});
+
+  const goPrev = () => { if(mo===0){setYr(y=>y-1);setMo(11);}else setMo(m=>m-1); };
+  const goNext = () => { if(mo===11){setYr(y=>y+1);setMo(0);}else setMo(m=>m+1); };
+
+  const openAdd = (ds) => {
+    setForm({title:'', date:ds, type:'exam', sid:'', note:''});
+    setAdding(true);
+  };
+
+  const saveEvent = () => {
+    if (!form.title.trim()) return;
+    setEvents(ev => [...ev, {...form, id:uid(), done:false}]);
+    setAdding(false);
+  };
+
+  const closeDetail = () => setSelEv(null);
+  const toggleDone  = () => {
+    setEvents(ev => ev.map(x => x.id===selEv.id ? {...x, done:!x.done} : x));
+    setSelEv(null);
+  };
+  const deleteEv = () => {
+    setEvents(ev => ev.filter(x => x.id!==selEv.id));
+    setSelEv(null);
+  };
+
+  // Build calendar grid
+  const firstDow = new Date(yr, mo, 1).getDay();   // 0=Sun
+  const daysInMo = new Date(yr, mo+1, 0).getDate();
+  const cellCount = Math.ceil((firstDow + daysInMo) / 7) * 7;
+  const cells = [];
+  for (let i = 0; i < cellCount; i++) {
+    const day = i - firstDow + 1;
+    cells.push((day >= 1 && day <= daysInMo) ? new Date(yr, mo, day) : null);
+  }
+  const weeks = [];
+  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i+7));
+
+  // Index events by date
+  const byDate = {};
+  for (let i = 0; i < events.length; i++) {
+    const e = events[i];
+    if (!byDate[e.date]) byDate[e.date] = [];
+    byDate[e.date].push(e);
+  }
+
+  // Study weeks in this month
+  const msStart = new Date(yr, mo, 1).getTime();
+  const msEnd   = new Date(yr, mo+1, 0).getTime();
+  const studyWks = [];
+  for (let wk = 1; wk <= 16; wk++) {
+    const b = wkBounds(wk);
+    if (b.e.getTime() >= msStart && b.s.getTime() <= msEnd) studyWks.push(wk);
+  }
+  const curWk = getWk(now);
+
+  const DOW_LABELS = ['일','월','화','수','목','금','토'];
+
+  return (
+    React.createElement('div', { style: {background:'#E8EDF5', minHeight:'100vh'},}
+
+      /* Header */
+      , React.createElement('div', { style: {padding:'20px 20px 10px', display:'flex',
+        justifyContent:'space-between', alignItems:'center'},}
+        , React.createElement(Btn, { onClick: goPrev, small: true,}, "‹")
+        , React.createElement('span', { style: {fontWeight:800, fontSize:18, color:'#3D4560'},}
+          , yr, "년 " , mo+1, "월"
+        )
+        , React.createElement('div', { style: {display:'flex', gap:8},}
+          , mode === 'schedule' && (
+            React.createElement(Btn, { onClick: ()=>openAdd(todStr), small: true, accent: true,}, "+ 추가" )
+          )
+          , React.createElement(Btn, { onClick: goNext, small: true,}, "›")
+        )
+      )
+
+      /* Mode toggle */
+      , React.createElement('div', { style: {background:'#E8EDF5', borderRadius:22, margin:'0 12px 12px',
+        padding:4, display:'flex', gap:4,
+        boxShadow:'inset 5px 5px 10px #c5cad4,inset -5px -5px 10px #ffffff'},}
+        , [['schedule','📅 일정 달력'],['study','📖 학습 진도']].map(([k,l]) => {
+          const active = mode === k;
+          return (
+            React.createElement('div', { key: k, onClick: ()=>setMode(k),
+              style: {flex:1, textAlign:'center', padding:'9px', borderRadius:18,
+                cursor:'pointer', fontSize:12, fontWeight:700,
+                background: active ? 'linear-gradient(145deg,#8B9BE8,#6B7FD4)' : 'transparent',
+                color: active ? '#fff' : '#9BA3BE',
+                boxShadow: active ? '4px 4px 10px #c5cad4,-2px -2px 6px #ffffff' : 'none'},}
+              , l
+            )
+          );
+        })
+      )
+
+      /* ── Schedule Calendar ── */
+      , mode === 'schedule' && (
+        React.createElement('div', null
+          , React.createElement('div', { style: {display:'flex', padding:'0 8px', marginBottom:4},}
+            , DOW_LABELS.map((d, i) => (
+              React.createElement('div', { key: i, style: {flex:1, textAlign:'center', fontSize:11,
+                fontWeight:700, padding:'4px 0',
+                color: i===0 ? '#E05C6B' : i===6 ? '#6B7FD4' : '#9BA3BE'},}
+                , d
+              )
+            ))
+          )
+          , React.createElement('div', { style: {background:'#E8EDF5', borderRadius:20, margin:'0 8px',
+            overflow:'hidden',
+            boxShadow:'8px 8px 16px #c5cad4,-8px -8px 16px #ffffff'},}
+            , weeks.map((week, wi) => (
+              React.createElement('div', { key: wi, style: {display:'grid', gridTemplateColumns:'repeat(7,1fr)',
+                borderBottom: wi < weeks.length-1 ? '1px solid rgba(197,202,212,0.4)' : 'none'},}
+                , week.map((date, di) => {
+                  const isLast = di === 6;
+                  if (!date) {
+                    return (
+                      React.createElement('div', { key: di, style: {
+                        borderRight: isLast ? 'none' : '1px solid rgba(197,202,212,0.3)',
+                        minHeight:80, background:'rgba(197,202,212,0.06)'},} )
+                    );
+                  }
+                  const ds   = dStr(date);
+                  const devs = byDate[ds] || [];
+                  const isT  = ds === todStr;
+                  const dow  = date.getDay();
+                  const numColor = isT ? '#fff' : dow===0 ? '#E05C6B' : dow===6 ? '#6B7FD4' : '#3D4560';
+                  return (
+                    React.createElement('div', { key: di, onClick: ()=>openAdd(ds),
+                      style: {borderRight: isLast ? 'none' : '1px solid rgba(197,202,212,0.3)',
+                        minHeight:80, padding:'4px 3px', cursor:'pointer',
+                        background: isT ? 'rgba(107,127,212,0.04)' : 'transparent'},}
+                      , React.createElement('div', { style: {display:'flex', justifyContent:'center', marginBottom:3},}
+                        , React.createElement('div', { style: {width:24, height:24, borderRadius:'50%',
+                          display:'flex', alignItems:'center', justifyContent:'center',
+                          fontSize:12, fontWeight: isT ? 800 : 400,
+                          color: numColor,
+                          background: isT
+                            ? 'linear-gradient(145deg,#8B9BE8,#6B7FD4)'
+                            : 'transparent',
+                          boxShadow: isT
+                            ? '2px 2px 6px #c5cad4,-1px -1px 4px #ffffff'
+                            : 'none'},}
+                          , date.getDate()
+                        )
+                      )
+                      , devs.slice(0, 3).map(ev => {
+                        const sub = subjects.find(s => s.id === ev.sid);
+                        const col = sub ? sub.color : ((TM[ev.type]||TM.study).c);
+                        return (
+                          React.createElement('div', { key: ev.id,
+                            onClick: e => { e.stopPropagation(); setSelEv(ev); },
+                            style: {display:'flex', alignItems:'center', gap:2,
+                              padding:'1px 4px', borderRadius:4, marginBottom:2,
+                              background: col+'22',
+                              border: '1px solid '+col+'66',
+                              opacity: ev.done ? 0.4 : 1,
+                              cursor:'pointer'},}
+                            , React.createElement('div', { style: {width:5, height:5, borderRadius:'50%',
+                              background:col, flexShrink:0},})
+                            , React.createElement('span', { style: {fontSize:9, fontWeight:700, color:col,
+                              overflow:'hidden', whiteSpace:'nowrap',
+                              textOverflow:'ellipsis', maxWidth:'100%',
+                              lineHeight:1.4},}
+                              , ev.title
+                            )
+                          )
+                        );
+                      })
+                      , devs.length > 3 && (
+                        React.createElement('div', { style: {fontSize:9, color:'#9BA3BE', fontWeight:600,
+                          paddingLeft:4},}, "+"
+                          , devs.length-3, "개"
+                        )
+                      )
+                    )
+                  );
+                })
+              )
+            ))
+          )
+        )
+      )
+
+      /* ── Study Progress ── */
+      , mode === 'study' && (
+        React.createElement('div', { style: {padding:'0 12px'},}
+          , React.createElement('div', { style: {fontSize:12, color:'#9BA3BE', fontWeight:600,
+            marginBottom:12, padding:'0 4px'},}, "📌 이 달의 주차별 학습 내용"
+
+          )
+          , studyWks.length === 0 ? (
+            React.createElement(Card, { style: {padding:'20px', textAlign:'center'},}
+              , React.createElement('span', { style: {color:'#9BA3BE'},}, "이 달에는 학기 주차가 없어요"    )
+            )
+          ) : studyWks.map(wk => {
+            const b     = wkBounds(wk);
+            const isNow = wk === curWk;
+            const subs  = subjects.filter(s => wsData[s.id] && wsData[s.id][wk-1]);
+            const cardShadow = isNow
+              ? '0 0 0 2px #6B7FD4, 8px 8px 16px #c5cad4, -8px -8px 16px #ffffff'
+              : '8px 8px 16px #c5cad4,-8px -8px 16px #ffffff';
+            return (
+              React.createElement('div', { key: wk, style: {background:'#E8EDF5', borderRadius:20,
+                marginBottom:14, overflow:'hidden', boxShadow:cardShadow},}
+                , React.createElement('div', { style: {padding:'10px 14px',
+                  background: isNow ? 'rgba(107,127,212,0.1)' : 'rgba(197,202,212,0.12)',
+                  borderBottom:'1px solid rgba(197,202,212,0.3)',
+                  display:'flex', alignItems:'center', gap:10},}
+                  , React.createElement('span', { style: {background: isNow
+                      ? 'linear-gradient(145deg,#8B9BE8,#6B7FD4)'
+                      : 'linear-gradient(145deg,#b0b8cccc,#9BA3BE)',
+                    borderRadius:20, padding:'2px 10px',
+                    color:'#fff', fontSize:11, fontWeight:800,
+                    boxShadow:'2px 2px 6px #c5cad4'},}
+                    , wk, "주"
+                  )
+                  , React.createElement('span', { style: {fontSize:12, color:'#9BA3BE', fontWeight:600},}
+                    , b.l
+                  )
+                  , isNow && (
+                    React.createElement('span', { style: {fontSize:10, color:'#6B7FD4', fontWeight:700,
+                      marginLeft:'auto'},}, "← 이번주"
+
+                    )
+                  )
+                )
+                , React.createElement('div', null
+                  , subs.map((sub, i) => {
+                    const ws = wsData[sub.id][wk-1];
+                    return (
+                      React.createElement('div', { key: sub.id, style: {display:'flex', alignItems:'center',
+                        gap:10, padding:'10px 14px',
+                        borderBottom: i < subs.length-1
+                          ? '1px solid rgba(197,202,212,0.2)' : 'none'},}
+                        , React.createElement('div', { style: {width:8, height:8, borderRadius:'50%',
+                          background:sub.color, flexShrink:0},} )
+                        , React.createElement('span', { style: {fontSize:11, color:sub.color, fontWeight:700,
+                          width:74, flexShrink:0},}
+                          , sub.name
+                        )
+                        , React.createElement('span', { style: {fontSize:11, color:'#3D4560', flex:1,
+                          lineHeight:1.3},}
+                          , ws.l
+                        )
+                        , ws.x && (
+                          React.createElement('span', { style: {fontSize:9, color:'#E05C6B', fontWeight:700,
+                            background:'rgba(224,92,107,0.13)', padding:'1px 5px',
+                            borderRadius:4, flexShrink:0},}, "🗓시험"
+
+                          )
+                        )
+                      )
+                    );
+                  })
+                )
+              )
+            );
+          })
+        )
+      )
+
+      /* ── Event Detail Modal ── */
+      , selEv !== null && (
+        React.createElement(EvModal, {
+          ev: selEv,
+          subjects: subjects,
+          onClose: closeDetail,
+          onDone: toggleDone,
+          onDel: deleteEv,}
+        )
+      )
+
+      /* ── Add Event Modal ── */
+      , adding && (
+        React.createElement(Modal, { title: "일정 추가" , onClose: ()=>setAdding(false),}
+          , React.createElement('div', { style: {display:'flex', flexDirection:'column', gap:12},}
+            , React.createElement(Inp, { value: form.title,
+              onChange: v=>setForm(f=>({...f,title:v})),
+              placeholder: "일정 이름" ,})
+            , React.createElement('input', { type: "date", value: form.date,
+              onChange: e=>setForm(f=>({...f,date:e.target.value})),
+              style: {background:'#E8EDF5', borderRadius:10, padding:'10px 14px',
+                color:'#3D4560', fontSize:14, border:'none', fontFamily:'inherit',
+                width:'100%', boxSizing:'border-box',
+                boxShadow:'inset 5px 5px 10px #c5cad4,inset -5px -5px 10px #ffffff'},})
+            , React.createElement('div', { style: {display:'flex', gap:8},}
+              , Object.entries(TM).map(([k,v]) => {
+                const active = form.type === k;
+                return (
+                  React.createElement('div', { key: k, onClick: ()=>setForm(f=>({...f,type:k})),
+                    style: {flex:1, textAlign:'center', padding:'8px 4px',
+                      borderRadius:12, cursor:'pointer', fontSize:11, fontWeight:600,
+                      background: active
+                        ? 'linear-gradient(145deg,'+v.c+'cc,'+v.c+')'
+                        : '#E8EDF5',
+                      color: active ? '#fff' : '#9BA3BE',
+                      boxShadow: active
+                        ? '4px 4px 10px #c5cad4,-2px -2px 6px #ffffff'
+                        : '3px 3px 6px #c5cad4,-3px -3px 6px #ffffff'},}
+                    , v.i, React.createElement('br', null), v.l
+                  )
+                );
+              })
+            )
+            , React.createElement(Sel, { value: form.sid, onChange: v=>setForm(f=>({...f,sid:v})),}
+              , React.createElement('option', { value: "",}, "과목 선택" )
+              , subjects.map(s => React.createElement('option', { key: s.id, value: s.id,}, s.name))
+            )
+            , React.createElement(Inp, { value: form.note,
+              onChange: v=>setForm(f=>({...f,note:v})),
+              placeholder: "메모 (선택사항)" ,})
+            , React.createElement(Btn, { onClick: saveEvent, accent: true, style: {width:'100%'},}, "저장")
+          )
+        )
+      )
+    )
+  );
+}
+
+/* ═══ SUBJECTS TAB ═════════════════════════════════════════════ */
+function SubjectsTab({subjects,setSubjects,wsData,setWsData}){
+  const [exp,setExp]=useState(null);const [edit,setEdit]=useState(null);const [form,setForm]=useState({});
+  const tog=id=>setExp(e=>e===id?null:id);
+  const se=sub=>{setEdit(sub.id);setForm({...sub});};
+  const sv=()=>{setSubjects(ss=>ss.map(s=>s.id===edit?{...s,...form}:s));setEdit(null);};
+  const tw=(sid,wk)=>setSubjects(ss=>ss.map(s=>{if(s.id!==sid)return s;const wp={...s.weekProgress};wp[wk]=!wp[wk];return{...s,weekProgress:wp};}));
+  return(
+    React.createElement('div', { style: {padding:'20px 20px 0'},}
+      , React.createElement('div', { style: {fontWeight:800,fontSize:20,color:TXT,marginBottom:8},}, "📚 과목 관리"  )
+      , React.createElement('div', { style: {...flat(12),padding:'10px 14px',marginBottom:18,fontSize:12,color:MUT,lineHeight:1.6},}, "💡 강의계획서 6개를 파싱해서 모든 주차별 학습 내용이 자동으로 등록되어 있어요. "
+                   , React.createElement('b', { style: {color:TXT},}, "예습/복습"), " 탭에서 체크리스트로 확인하세요."
+      )
+      , subjects.map(sub=>{
+        const done=Object.values(sub.weekProgress||{}).filter(Boolean).length;
+        const wk=getWk(new Date());const ws=_optionalChain([wsData, 'access', _16 => _16[sub.id], 'optionalAccess', _17 => _17[wk-1]]);
+        return(
+          React.createElement(Card, { key: sub.id, style: {marginBottom:14,overflow:'hidden'},}
+            , React.createElement('div', { style: {display:'flex',alignItems:'center',gap:12,padding:'16px',cursor:'pointer'}, onClick: ()=>tog(sub.id),}
+              , React.createElement('div', { style: {width:12,height:12,borderRadius:'50%',background:sub.color,flexShrink:0,boxShadow:`2px 2px 6px ${sub.color}88`},})
+              , React.createElement('div', { style: {flex:1},}
+                , React.createElement('div', { style: {fontWeight:700,fontSize:15,color:TXT},}, sub.name)
+                , React.createElement('div', { style: {fontSize:11,color:MUT,marginTop:1},}, sub.professor, sub.isOnline?' · 온라인':'', " · "  , done, "/16주")
+                , ws&&React.createElement('div', { style: {fontSize:10,color:sub.color,marginTop:2,fontWeight:600},}, "이번주: " , ws.l)
+              )
+              , React.createElement('span', { style: {color:MUT,display:'inline-block',transform:exp===sub.id?'rotate(180deg)':'none',transition:'0.2s'},}, "⌄")
+            )
+            , exp===sub.id&&(
+              React.createElement('div', { style: {borderTop:`1px solid ${SH1}30`,padding:'16px'},}
+                , edit===sub.id?(
+                  React.createElement('div', { style: {display:'flex',flexDirection:'column',gap:12},}
+                    , React.createElement(Inp, { value: form.professor||'', onChange: v=>setForm(f=>({...f,professor:v})), placeholder: "교수님",})
+                    , React.createElement('div', null
+                      , React.createElement('div', { style: {fontSize:12,color:MUT,marginBottom:6},}, "🔗 NotebookLM 링크"  )
+                      , React.createElement(Inp, { value: form.lmLink||'', onChange: v=>setForm(f=>({...f,lmLink:v})), placeholder: "https://notebooklm.google.com/...",})
+                    )
+                    , React.createElement('div', null, React.createElement('div', { style: {fontSize:12,color:MUT,marginBottom:6},}, "📋 평가 기준"  )
+                      , React.createElement(Inp, { value: form.syllabus||'', onChange: v=>setForm(f=>({...f,syllabus:v})), placeholder: "중간: 30%\n기말: 40%"  , multi: true,})
+                    )
+                    , React.createElement('div', { style: {display:'flex',gap:10},}, React.createElement(Btn, { onClick: ()=>setEdit(null), style: {flex:1},}, "취소"), React.createElement(Btn, { onClick: sv, accent: true, style: {flex:2},}, "저장"))
+                  )
+                ):(
+                  React.createElement('div', null
+                    , sub.lmLink
+                      ?React.createElement('a', { href: sub.lmLink, target: "_blank", rel: "noreferrer", style: {display:'flex',alignItems:'center',gap:10,padding:'12px 14px',...flat(12),marginBottom:12,textDecoration:'none'},}
+                          , React.createElement('span', { style: {fontSize:20},}, "🔗"), React.createElement('div', { style: {flex:1},}, React.createElement('div', { style: {fontSize:12,fontWeight:700,color:ACC},}, "NotebookLM 열기" )), React.createElement('span', { style: {color:MUT},}, "›")
+                        )
+                      :React.createElement('div', { style: {...ins(10),padding:'10px 14px',marginBottom:12,fontSize:12,color:MUT},}, "🔗 LM 링크 미등록 — 아래 수정 버튼으로 추가하세요"        )
+                    
+                    , sub.syllabus&&React.createElement('div', { style: {...ins(10),padding:'12px 14px',marginBottom:12},}
+                      , React.createElement('div', { style: {fontSize:11,color:MUT,marginBottom:4},}, "📋 평가 기준"  )
+                      , React.createElement('pre', { style: {fontSize:12,color:TXT,margin:0,whiteSpace:'pre-wrap',fontFamily:'inherit',lineHeight:1.7},}, sub.syllabus)
+                    )
+                    , wsData[sub.id]&&(
+                      React.createElement('div', { style: {...ins(10),padding:'12px 14px',marginBottom:12,maxHeight:180,overflowY:'auto'},}
+                        , React.createElement('div', { style: {fontSize:11,color:MUT,marginBottom:8},}, "📖 주차별 학습 내용"   )
+                        , wsData[sub.id].map((ws,i)=>(
+                          React.createElement('div', { key: i, style: {display:'flex',gap:8,padding:'4px 0',borderBottom:`1px solid ${SH1}20`,alignItems:'flex-start'},}
+                            , React.createElement('span', { style: {fontSize:10,color:ACC,fontWeight:700,flexShrink:0,width:22},}, i+1, "주")
+                            , React.createElement('span', { style: {fontSize:10,color:ws.x?RED:TXT,lineHeight:1.4},}, ws.l)
+                          )
+                        ))
+                      )
+                    )
+                    , React.createElement('div', { style: {marginBottom:12},}
+                      , React.createElement('div', { style: {fontSize:12,color:MUT,marginBottom:8},}, "📈 강의 진도 체크 ("    , done, "/16주)")
+                      , React.createElement('div', { style: {display:'flex',flexWrap:'wrap',gap:5},}
+                        , Array.from({length:16},(_,i)=>i+1).map(wk2=>{
+                          const ok=_optionalChain([sub, 'access', _18 => _18.weekProgress, 'optionalAccess', _19 => _19[wk2]]);const isNow=wk2===wk;
+                          return(React.createElement('div', { key: wk2, onClick: ()=>tw(sub.id,wk2), style: {width:32,height:32,borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',fontSize:10,fontWeight:700,transition:'all 0.15s',position:'relative',
+                            ...(ok?{background:sub.color,color:'#fff',boxShadow:`3px 3px 8px ${sub.color}66`}:{...neu(8,3),color:MUT})},}
+                            , wk2, isNow&&React.createElement('div', { style: {position:'absolute',top:-3,right:-3,width:7,height:7,borderRadius:'50%',background:ACC,border:`1px solid ${BG}`},})
+                          ));
+                        })
+                      )
+                    )
+                    , React.createElement(Btn, { onClick: ()=>se(sub), style: {width:'100%'},}, "✏️ 정보 수정 (LM 링크 등)"     )
+                  )
+                )
+              )
+            )
+          )
+        );
+      })
+    )
+  );
+}
+
+/* ═══ MATERIALS TAB ════════════════════════════════════════════ */
+function MaterialsTab({subjects,materials,setMaterials,memos,setMemos}){
+  const [fil,setFil]=useState('all');const [q,setQ]=useState('');const [modal,setModal]=useState(false);const [vw,setVw]=useState('materials');const [form,setForm]=useState({title:'',content:'',sid:''});
+  const add=()=>{if(!form.title.trim())return;setMaterials(m=>[{...form,id:uid(),date:today()},...m]);setForm({title:'',content:'',sid:''});setModal(false);};
+  const items=vw==='materials'?materials.filter(m=>(fil==='all'||m.sid===fil)&&(m.title+m.content).toLowerCase().includes(q.toLowerCase())):memos.filter(m=>(fil==='all'||m.sid===fil)&&m.content.toLowerCase().includes(q.toLowerCase()));
+  return(
+    React.createElement('div', { style: {padding:'20px 20px 0'},}
+      , React.createElement('div', { style: {display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14},}
+        , React.createElement('div', { style: {fontWeight:800,fontSize:20,color:TXT},}, "📁 자료" )
+        , vw==='materials'&&React.createElement(Btn, { onClick: ()=>setModal(true), small: true, accent: true,}, "+ 추가" )
+      )
+      , React.createElement('div', { style: {...ins(22),padding:4,display:'flex',gap:4,marginBottom:14},}
+        , [['materials','📄 자료'],['memos','✏️ 메모']].map(([k,l])=>(
+          React.createElement('div', { key: k, onClick: ()=>setVw(k), style: {flex:1,textAlign:'center',padding:'9px',borderRadius:18,cursor:'pointer',fontSize:13,fontWeight:700,
+            ...(vw===k?{...pill(ACC),color:'#fff'}:{color:MUT})},}, l)
+        ))
+      )
+      , React.createElement('div', { style: {...ins(14),display:'flex',alignItems:'center',gap:8,padding:'0 14px',marginBottom:12},}
+        , React.createElement('span', { style: {color:MUT},}, "🔍")
+        , React.createElement('input', { value: q, onChange: e=>setQ(e.target.value), placeholder: "검색...", style: {flex:1,background:'transparent',border:'none',outline:'none',color:TXT,fontSize:14,fontFamily:'inherit',padding:'12px 0'},})
+      )
+      , React.createElement('div', { style: {display:'flex',gap:8,overflowX:'auto',paddingBottom:8,marginBottom:14},}
+        , [{id:'all',name:'전체',color:ACC},...subjects].map(s=>(
+          React.createElement('div', { key: s.id, onClick: ()=>setFil(s.id), style: {flexShrink:0,padding:'6px 14px',borderRadius:20,cursor:'pointer',fontSize:12,fontWeight:700,
+            ...(fil===s.id?{background:s.color,color:'#fff',boxShadow:`3px 3px 8px ${SH1}`}:{...flat(20),color:MUT})},}, s.name)
+        ))
+      )
+      , items.length===0?React.createElement(Card, { style: {padding:'20px',textAlign:'center'},}, React.createElement('span', { style: {color:MUT},}, "항목이 없어요" ))
+        :items.map(item=>{const sub=subjects.find(s=>s.id===item.sid);const dl=vw==='materials'?()=>setMaterials(m=>m.filter(x=>x.id!==item.id)):()=>setMemos(m=>m.filter(x=>x.id!==item.id));return(
+          React.createElement(Card, { key: item.id, style: {padding:'14px 16px',marginBottom:12},}
+            , React.createElement('div', { style: {display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:8},}
+              , React.createElement('div', null, vw==='materials'&&React.createElement('div', { style: {fontWeight:700,fontSize:14,color:TXT,marginBottom:4},}, item.title)
+                , React.createElement('div', { style: {display:'flex',gap:6,alignItems:'center'},}, sub&&React.createElement('span', { style: {fontSize:10,color:sub.color,fontWeight:700},}, sub.name), React.createElement('span', { style: {fontSize:10,color:MUT},}, item.date))
+              )
+              , React.createElement(Btn, { onClick: dl, small: true,}, "🗑")
+            )
+            , React.createElement('div', { style: {fontSize:13,color:TXT,lineHeight:1.6,whiteSpace:'pre-wrap'},}, item.content)
+          )
+        );})
+      , modal&&(
+        React.createElement(Modal, { title: "자료 추가" , onClose: ()=>setModal(false),}
+          , React.createElement('div', { style: {display:'flex',flexDirection:'column',gap:12},}
+            , React.createElement(Inp, { value: form.title, onChange: v=>setForm(f=>({...f,title:v})), placeholder: "제목",})
+            , React.createElement(Inp, { value: form.content, onChange: v=>setForm(f=>({...f,content:v})), placeholder: "내용...", multi: true,})
+            , React.createElement(Sel, { value: form.sid, onChange: v=>setForm(f=>({...f,sid:v})),}
+              , React.createElement('option', { value: "",}, "과목 선택" ), subjects.map(s=>React.createElement('option', { key: s.id, value: s.id,}, s.name))
+            )
+            , React.createElement(Btn, { onClick: add, accent: true, style: {width:'100%'},}, "저장")
+          )
+        )
+      )
+    )
+  );
+}
+
+/* ═══ SETTINGS TAB ════════════════════════════════════════════ */
+function SettingsTab({exportJSON, importJSON, resetAll, wsData, setWsData, subjects}) {
+  const fileRef = useRef(null);
+  const curWk   = getWk(new Date());
+
+  return (
+    React.createElement('div', { style: {padding:'24px 20px 0'},}
+      , React.createElement('div', { style: {fontWeight:800, fontSize:22, color:TXT, marginBottom:6},}, "⚙️ 설정" )
+      , React.createElement('div', { style: {fontSize:13, color:MUT, marginBottom:22},}, "데이터 관리 & 커스터마이징"   )
+
+      /* ── Data section ── */
+      , React.createElement('div', { style: {fontSize:13, color:MUT, fontWeight:700, marginBottom:12},}, "💾 데이터 저장"  )
+      , React.createElement(Card, { style: {padding:'16px', marginBottom:10},}
+        , React.createElement('div', { style: {display:'flex', alignItems:'center', gap:12},}
+          , React.createElement('span', { style: {fontSize:28},}, "📥")
+          , React.createElement('div', { style: {flex:1},}
+            , React.createElement('div', { style: {fontWeight:700, color:TXT, fontSize:14},}, "JSON으로 내보내기" )
+            , React.createElement('div', { style: {fontSize:11, color:MUT, marginTop:2},}, "모든 데이터를 파일로 저장합니다. 백업이나 기기 이전에 사용하세요."       )
+          )
+          , React.createElement(Btn, { onClick: exportJSON, accent: true, small: true,}, "내보내기")
+        )
+      )
+      , React.createElement(Card, { style: {padding:'16px', marginBottom:10},}
+        , React.createElement('div', { style: {display:'flex', alignItems:'center', gap:12},}
+          , React.createElement('span', { style: {fontSize:28},}, "📤")
+          , React.createElement('div', { style: {flex:1},}
+            , React.createElement('div', { style: {fontWeight:700, color:TXT, fontSize:14},}, "JSON 불러오기" )
+            , React.createElement('div', { style: {fontSize:11, color:MUT, marginTop:2},}, "기존에 내보낸 파일로 데이터를 복원합니다."    )
+          )
+          , React.createElement('input', { ref: fileRef, type: "file", accept: ".json", style: {display:'none'},
+            onChange: e=>{ importJSON(e.target.files[0]); e.target.value=''; },})
+          , React.createElement(Btn, { onClick: ()=>fileRef.current.click(), small: true,}, "불러오기")
+        )
+      )
+      , React.createElement(Card, { style: {padding:'14px 16px', marginBottom:24},}
+        , React.createElement('div', { style: {...flat(10), padding:'10px 14px', marginBottom:10, fontSize:12, color:MUT, lineHeight:1.7},}, "📱 "
+           , React.createElement('b', { style: {color:TXT},}, "폰에서 앱처럼 쓰려면?"  ), React.createElement('br', null), "Safari → 공유 → "
+              , React.createElement('b', { style: {color:ACC},}, "홈 화면에 추가"  ), React.createElement('br', null), "Chrome → 메뉴 → "
+              , React.createElement('b', { style: {color:ACC},}, "홈 화면에 추가"  ), React.createElement('br', null), "데이터는 브라우저 로컬에 자동 저장됩니다. 앱 삭제 시 삭제되니 주기적으로 JSON 내보내기를 권장해요."
+
+        )
+      )
+
+      /* ── Weekly schedule edit section ── */
+      , React.createElement('div', { style: {fontSize:13, color:MUT, fontWeight:700, marginBottom:12},}, "📖 주차별 학습 내용 수정"    )
+      , React.createElement('div', { style: {...flat(12), padding:'10px 14px', marginBottom:14, fontSize:12, color:MUT, lineHeight:1.6},}, "예습/복습 탭의 ✏️ 버튼으로 특정 주차 내용을 수정할 수 있어요."
+                 , React.createElement('br', null), "아래에서 전체 초기화도 가능합니다."
+
+      )
+      , subjects.filter(s=>wsData[s.id]).map(sub => {
+        const wkData = wsData[sub.id];
+        const total  = wkData.length;
+        const filled = wkData.filter(w=>w&&w.t&&w.t.length>0).length;
+        return (
+          React.createElement(Card, { key: sub.id, style: {padding:'12px 16px', marginBottom:10},}
+            , React.createElement('div', { style: {display:'flex', alignItems:'center', gap:10},}
+              , React.createElement('div', { style: {width:10, height:10, borderRadius:'50%', background:sub.color, flexShrink:0},})
+              , React.createElement('span', { style: {fontWeight:700, fontSize:14, color:TXT, flex:1},}, sub.name)
+              , React.createElement('span', { style: {fontSize:11, color:MUT},}, filled, "/", total, "주")
+              , React.createElement(Btn, { onClick: ()=>{
+                if(!window.confirm(`${sub.name}의 주차별 내용을 기본값으로 초기화할까요?`))return;
+                setWsData(d=>({...d, [sub.id]:JSON.parse(JSON.stringify(WS[sub.id]||[]))}));
+              }, color: ORG, small: true,}, "초기화")
+            )
+          )
+        );
+      })
+
+      /* ── Danger zone ── */
+      , React.createElement('div', { style: {fontSize:13, color:RED, fontWeight:700, marginBottom:12, marginTop:24},}, "⚠️ 위험 구역"  )
+      , React.createElement(Card, { style: {padding:'16px', marginBottom:40},}
+        , React.createElement('div', { style: {display:'flex', alignItems:'center', gap:12},}
+          , React.createElement('span', { style: {fontSize:28},}, "🗑️")
+          , React.createElement('div', { style: {flex:1},}
+            , React.createElement('div', { style: {fontWeight:700, color:TXT, fontSize:14},}, "전체 초기화" )
+            , React.createElement('div', { style: {fontSize:11, color:MUT, marginTop:2},}, "모든 데이터를 삭제하고 앱을 초기 상태로 되돌립니다."      )
+          )
+          , React.createElement(Btn, { onClick: resetAll, color: RED, small: true,}, "초기화")
+        )
+      )
+    )
+  );
+}
+
+/* ═══ MAIN APP ══════════════════════════════════════════════════ */
+export default function App(){
+  const [tab,setTab]=useState('home');const [rdy,setRdy]=useState(false);
+  const [subjects,setSubjects]=useState(I_SUBS);
+  const [timetable,setTimetable]=useState(I_TT);
+  const [events,setEvents]=useState(I_EV);
+  const [materials,setMaterials]=useState([]);
+  const [memos,setMemos]=useState([]);
+  const [todos,setTodos]=useState([]);
+  const [studyCheck,setStudyCheck]=useState({});
+  const [wsData,setWsData]=useState(()=>JSON.parse(JSON.stringify(WS)));
+
+  useEffect(()=>{
+    const ss=DB.get('subjects'), tt=DB.get('timetable'), ev=DB.get('events');
+    const mat=DB.get('materials'), mo=DB.get('memos'), td=DB.get('todos');
+    const sc=DB.get('studyCheck'), ws=DB.get('wsData');
+    if(ss){const m=[...ss];I_SUBS.forEach(is=>{if(!ss.find(s=>s.id===is.id))m.push(is);});setSubjects(m);}
+    if(ev){const m=[...ev];I_EV.forEach(ie=>{if(!ev.find(e=>e.id===ie.id))m.push(ie);});setEvents(m);}
+    if(tt)setTimetable(tt); if(mat)setMaterials(mat); if(mo)setMemos(mo);
+    if(td)setTodos(td); if(sc)setStudyCheck(sc);
+    if(ws){ setWsData({...WS,...ws}); }
+    setRdy(true);
+  },[]);
+
+  useEffect(()=>{ if(rdy) DB.set('subjects',subjects); },[subjects,rdy]);
+  useEffect(()=>{if(rdy)DB.set('timetable',timetable);},[timetable,rdy]);
+  useEffect(()=>{if(rdy)DB.set('events',events);},[events,rdy]);
+  useEffect(()=>{if(rdy)DB.set('materials',materials);},[materials,rdy]);
+  useEffect(()=>{if(rdy)DB.set('memos',memos);},[memos,rdy]);
+  useEffect(()=>{if(rdy)DB.set('todos',todos);},[todos,rdy]);
+  useEffect(()=>{if(rdy)DB.set('studyCheck',studyCheck);},[studyCheck,rdy]);
+  useEffect(()=>{if(rdy)DB.set('wsData',wsData);},[wsData,rdy]);
+
+  // ── Auto weekly backup ──
+  useEffect(()=>{
+    if (!rdy) return;
+    const last = localStorage.getItem('sp_lastBackup');
+    const now  = Date.now();
+    const WEEK = 7 * 24 * 60 * 60 * 1000;
+    if (!last || now - parseInt(last) > WEEK) {
+      // Show reminder after 2s so app loads first
+      const t = setTimeout(() => {
+        const ok = window.confirm(
+          '📦 자동 백업 알림\n\n마지막 백업으로부터 7일이 지났어요.\n지금 JSON으로 내보낼까요?'
+        );
+        if (ok) doExport();
+        localStorage.setItem('sp_lastBackup', String(Date.now()));
+      }, 2000);
+      return () => clearTimeout(t);
+    }
+  }, [rdy]);
+
+  const doExport = () => {
+    const data={subjects,timetable,events,materials,memos,todos,studyCheck,wsData,exportedAt:new Date().toISOString()};
+    const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url; a.download=`study-planner-${today()}.json`; a.click();
+    URL.revokeObjectURL(url);
+    localStorage.setItem('sp_lastBackup', String(Date.now()));
+  };
+
+  // ── JSON Export/Import ──
+  const exportJSON = () => {
+    doExport();
+  };
+  const importJSON = (file) => {
+    if(!file)return;
+    const reader=new FileReader();
+    reader.onload=e=>{
+      try{
+        const d=JSON.parse(e.target.result);
+        if(d.subjects)setSubjects(d.subjects);
+        if(d.timetable)setTimetable(d.timetable);
+        if(d.events)setEvents(d.events);
+        if(d.materials)setMaterials(d.materials);
+        if(d.memos)setMemos(d.memos);
+        if(d.todos)setTodos(d.todos);
+        if(d.studyCheck)setStudyCheck(d.studyCheck);
+        if(d.wsData)setWsData(d.wsData);
+        alert('✅ 데이터를 불러왔어요!');
+      }catch (e5){ alert('❌ 파일을 읽을 수 없어요. 올바른 JSON 파일인지 확인하세요.'); }
+    };
+    reader.readAsText(file);
+  };
+  const resetAll = () => {
+    if(!window.confirm('⚠️ 모든 데이터를 초기화할까요? 이 작업은 되돌릴 수 없어요.'))return;
+    DB.keys().forEach(k=>localStorage.removeItem('sp_'+k));
+    window.location.reload();
+  };
+
+  const sh={subjects,setSubjects,timetable,setTimetable,events,setEvents,materials,setMaterials,memos,setMemos,todos,setTodos,studyCheck,setStudyCheck,wsData,setWsData,exportJSON,importJSON,resetAll};
+  const td2=today();
+  const badge=todos.filter(t=>t.date===td2&&!t.done).length+events.filter(e=>e.date===td2&&!e.done).length;
+  const curWk=getWk(new Date());
+  const studyBadge=Object.keys(sh.studyCheck||{}).filter(k=>k.includes(`_${curWk}_`)&&!sh.studyCheck[k]).length===0&&false; // future use
+
+  if(!rdy)return(
+    React.createElement('div', { style: {display:'flex',alignItems:'center',justifyContent:'center',height:'100vh',background:BG},}
+      , React.createElement('div', { style: {...neu(30,14),padding:'32px 48px',textAlign:'center'},}
+        , React.createElement('div', { style: {fontSize:36,marginBottom:12},}, "📚")
+        , React.createElement('div', { style: {color:ACC,fontWeight:700,fontSize:16},}, "불러오는 중..." )
+      )
+    )
+  );
+
+  const TABS=[
+    {id:'home',      i:'🏠', l:'홈'},
+    {id:'study',     i:'📖', l:'예습'},
+    {id:'calendar',  i:'📅', l:'달력'},
+    {id:'todo',      i:'✅', l:'할일'},
+    {id:'timetable', i:'📋', l:'시간표'},
+    {id:'subjects',  i:'📚', l:'과목'},
+    {id:'settings',  i:'⚙️', l:'설정'},
+  ];
+
+  return(
+    React.createElement('div', { style: {fontFamily:"'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR',system-ui",background:BG,minHeight:'100vh',color:TXT,paddingBottom:80,maxWidth:480,margin:'0 auto'},}
+      , tab==='home'     &&React.createElement(HomeTab, {     ...sh,})
+      , tab==='study'    &&React.createElement(StudyTab, {    ...sh,})
+      , tab==='todo'     &&React.createElement(TodoTab, {     ...sh,})
+      , tab==='timetable'&&React.createElement(TimetableTab, {...sh,})
+      , tab==='calendar' &&React.createElement(CalendarTab, { ...sh,})
+      , tab==='subjects' &&React.createElement(SubjectsTab, { ...sh,})
+      , tab==='materials'&&React.createElement(MaterialsTab, {...sh,})
+      , tab==='settings'&&React.createElement(SettingsTab, { ...sh,})
+
+      /* Bottom nav */
+      , React.createElement('div', { style: {position:'fixed',bottom:0,left:'50%',transform:'translateX(-50%)',width:'100%',maxWidth:480,zIndex:999,paddingBottom:'env(safe-area-inset-bottom)'},}
+        , React.createElement('div', { style: {...neu(0,10),borderRadius:'24px 24px 0 0',display:'flex',padding:'8px 0 6px',boxShadow:`0 -6px 20px ${SH1},0 -2px 8px ${SH2}`},}
+          , TABS.map(({id,i,l})=>{
+            const active=tab===id;
+            const hasBadge=(id==='todo'&&badge>0&&!active);
+            return(
+              React.createElement('button', { key: id, onClick: ()=>setTab(id), style: {flex:1,padding:'6px 0 4px',background:'none',border:'none',cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',gap:2,position:'relative'},}
+                , React.createElement('span', { style: {fontSize:id==='study'?18:19,opacity:active?1:0.5,transition:'all 0.2s'},}, i)
+                , React.createElement('span', { style: {fontSize:9,fontWeight:active?800:500,color:active?ACC:MUT,letterSpacing:0.2},}, l)
+                , active&&React.createElement('div', { style: {position:'absolute',bottom:0,left:'50%',transform:'translateX(-50%)',width:22,height:3,borderRadius:3,background:`linear-gradient(90deg,#8B9BE8,${ACC})`},})
+                , hasBadge&&React.createElement('div', { style: {position:'absolute',top:3,right:'12%',width:9,height:9,borderRadius:'50%',background:RED,border:`2px solid ${BG}`},})
+              )
+            );
+          })
+        )
+      )
+    )
+  );
+}
+
+
+  ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+  </script>
+</body>
+</html>
